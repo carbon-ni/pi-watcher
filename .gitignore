@@ -6,3 +6,6 @@ coverage/
 !.env.example
 *.log
 .DS_Store
+
+# Generated code-intelligence indexes
+**/.pi/ast-index.sqlite

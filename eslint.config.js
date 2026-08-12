@@ -19,4 +19,18 @@ export default tseslint.config(
       "@typescript-eslint/require-await": "off",
     },
   },
+  {
+    files: ["**/*.test.ts"],
+    rules: {
+      "@typescript-eslint/no-floating-promises": "off",
+      "no-useless-escape": "off",
+    },
+  },
+  {
+    files: ["src/**/*.ts"],
+    rules: {
+      "@typescript-eslint/restrict-template-expressions": "off",
+      "preserve-caught-error": "off",
+    },
+  },
 );

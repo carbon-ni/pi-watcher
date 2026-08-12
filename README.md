@@ -1,6 +1,6 @@
 # pi-watcher
 
-Guarded TypeScript starter for a [Pi](https://pi.dev) extension package.
+[Pi](https://pi.dev) extension exposing compact Funzzy watcher status, target discovery, and stable verification.
 
 ## Start
 
@@ -12,7 +12,7 @@ make all
 make try
 ```
 
-`make try` loads `extensions/index.ts`. Ask Pi to use `greet` or invoke it through an agent turn.
+`make try` loads `src/index.ts`. Configure Funzzy through project `.watch.yaml`; see [Funzzy watcher setup](docs/FUNZZY-WATCHER.md).
 
 ## One command per lifecycle stage
 
@@ -24,11 +24,11 @@ make try
 | Pre-push / CI     | `make all`            | `.githooks/pre-push` + GitHub Actions |
 | Manual smoke test | `make try`            | Pi loads package entrypoint           |
 
-`make all` is definition of done: format, lint, typecheck, 100% domain coverage, and dependency audit must pass.
+`make all` is definition of done: format, lint, typecheck, coverage budgets (80% statements, 85% lines, 90% functions, and 70% branches), and dependency audit must pass.
 
 ## Pi package
 
-`package.json#pi.extensions` exposes `./extensions`. During development:
+`package.json#pi.extensions` exposes `./src/index.ts`. During development:
 
 ```sh
 pi -e .

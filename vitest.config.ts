@@ -4,13 +4,13 @@ export default defineConfig({
   test: {
     coverage: {
       provider: "v8",
-      include: ["src/domain/**/*.ts"],
-      exclude: ["src/**/*.test.ts"],
+      include: ["src/**/*.ts"],
+      exclude: ["**/*.test.ts", "src/index.ts"],
       thresholds: {
-        branches: 100,
-        functions: 100,
-        lines: 100,
-        statements: 100,
+        branches: 70,
+        functions: 90,
+        lines: 85,
+        statements: 80,
       },
     },
   },

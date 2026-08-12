@@ -33,4 +33,4 @@ quick: format lint typecheck test ## Run pre-commit checks
 all: format lint typecheck coverage security ## Run complete local/CI gate
 
 try: ## Load extension in Pi for an interactive smoke test
-	pi -e ./extensions/index.ts
+	pi -e ./src/index.ts

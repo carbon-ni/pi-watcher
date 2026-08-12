@@ -1,0 +1,49 @@
+{
+  "name": "pi-watcher",
+  "version": "0.1.0",
+  "description": "A guarded TypeScript starter for a Pi extension",
+  "type": "module",
+  "private": true,
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "keywords": [
+    "pi-package"
+  ],
+  "pi": {
+    "extensions": [
+      "./extensions"
+    ]
+  },
+  "files": [
+    "extensions",
+    "src"
+  ],
+  "scripts": {
+    "build": "npm run typecheck",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "format": "prettier --check .",
+    "format:write": "prettier --write .",
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "security": "npm audit --audit-level=high",
+    "check": "npm run format && npm run lint && npm run typecheck && npm run test:coverage && npm run security"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-ai": "*",
+    "@earendil-works/pi-coding-agent": "*"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-ai": "0.84.1",
+    "@earendil-works/pi-coding-agent": "0.84.1",
+    "@eslint/js": "10.0.1",
+    "@types/node": "26.2.0",
+    "@vitest/coverage-v8": "4.1.10",
+    "eslint": "10.8.1",
+    "prettier": "3.9.6",
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.67.0",
+    "vitest": "4.1.10"
+  }
+}

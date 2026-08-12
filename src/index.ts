@@ -5,7 +5,6 @@ import {
   listTargets,
   queryStatus,
   requestRun,
-  type FunzzyStatus,
   type FunzzyTarget,
 } from "./infra/client.js";
 import { requestStableRun, waitForRun } from "./application/stable-run.js";
@@ -13,6 +12,7 @@ import { readConfig } from "./infra/config.js";
 import { worktreeFingerprint } from "./infra/fingerprint.js";
 import { createFailureNotifier } from "./domain/failure-notifier.js";
 import { recordsAgentActivity } from "./domain/activity.js";
+import { renderWatcherFooter } from "./domain/status-presentation.js";
 import {
   clearPinnedResponder,
   readResponder,
@@ -20,7 +20,7 @@ import {
   setPinnedResponder,
 } from "./infra/ownership.js";
 
-const STATUS_KEY = "funzzy-status";
+const STATUS_KEY = "watcher-status";
 
 export default function funzzyStatus(pi: ExtensionAPI) {
   let pollTimer: NodeJS.Timeout | undefined;
@@ -52,11 +52,11 @@ export default function funzzyStatus(pi: ExtensionAPI) {
       polling = true;
       try {
         const status = await queryStatus(config.socketPath);
-        ctx.ui.setStatus(STATUS_KEY, renderFooterStatus(status));
+        ctx.ui.setStatus(STATUS_KEY, renderWatcherFooter(status));
         const responder = await readResponder(config.socketPath);
         notifyFailure?.(status, ctx.isIdle(), responder?.sessionId ?? null);
       } catch {
-        ctx.ui.setStatus(STATUS_KEY, ctx.ui.theme.fg("warning", "funzzy: unavailable"));
+        ctx.ui.setStatus(STATUS_KEY, ctx.ui.theme.fg("warning", "watcher: unavailable"));
       } finally {
         polling = false;
       }
@@ -305,9 +305,4 @@ export default function funzzyStatus(pi: ExtensionAPI) {
 function formatTargets(targets: FunzzyTarget[]): string {
   if (targets.length === 0) return "No Funzzy targets configured";
   return targets.map((target) => `- ${target.name}: ${target.commands.join(" && ")}`).join("\n");
-}
-
-function renderFooterStatus(status: FunzzyStatus): string {
-  const duration = status.durationMs === null ? "" : ` ${status.durationMs}ms`;
-  return `funzzy: ${status.state} #${status.generation}${duration}`;
 }

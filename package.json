@@ -16,7 +16,16 @@
     ]
   },
   "files": [
-    "src",
+    "src/index.ts",
+    "src/application/stable-run.ts",
+    "src/domain/activity.ts",
+    "src/domain/failure-notifier.ts",
+    "src/domain/status-presentation.ts",
+    "src/domain/watcher.ts",
+    "src/infra/client.ts",
+    "src/infra/config.ts",
+    "src/infra/fingerprint.ts",
+    "src/infra/ownership.ts",
     "README.md",
     "docs"
   ],

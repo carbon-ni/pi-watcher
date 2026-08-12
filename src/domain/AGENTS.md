@@ -1,0 +1,21 @@
+# Domain layer
+
+Owns watcher vocabulary and deterministic decisions.
+
+## Modules
+
+- `watcher.ts`: canonical `WatcherStatus`, `WatcherTarget`, and execution states.
+- `activity.ts`: decides which Pi tool calls represent worktree activity.
+- `failure-notifier.ts`: decides whether one failed generation should be delivered.
+- `status-presentation.ts`: renders compact user-facing watcher status.
+
+## Boundaries
+
+- No imports from `application/`, `infra/`, Pi packages, or Node built-ins in production files.
+- No filesystem, clock, socket, environment, Git, or UI side effects.
+- Use `watcher` in user-facing names. `Funzzy` is acceptable only when naming external product/protocol.
+- Keep policies explicit and deterministic; pass needed values as arguments.
+
+## Verification
+
+Tests are colocated. Cover accepted and rejected decisions, including missing values and duplicate delivery. Run `npm test -- --run src/domain` then `make all`.

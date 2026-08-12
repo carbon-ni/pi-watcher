@@ -30,7 +30,7 @@ The extension adds:
 - `watcher_targets` agent tool for discovering target names and commands
 - `watcher_verify` final-gate tool (defaults to target `@agent-final`)
 - `/watcher-status`, `/watcher-targets`, and `/watcher-responder` commands
-- compact footer status
+- compact, colored watcher status right-aligned below editor
 - automatic failed-run context delivery when the agent is idle
 
 The extension records the latest Pi session before `bash`, `edit`, and `write` calls in atomic state files beside the control socket. Each failed generation is sent once only to that responder and triggers a follow-up turn; failures detected while responder is busy are held until `agent_settled`. Funzzy remains unaware of Pi sessions.

@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { renderWatcherFooter, watcherStatusColor } from "./status-presentation.js";
+import {
+  renderWatcherFooter,
+  rightAlignWatcherText,
+  WATCHER_WIDGET_OPTIONS,
+  watcherStatusColor,
+} from "./status-presentation.js";
 import type { WatcherStatus } from "./watcher.js";
 
 const status: WatcherStatus = {
@@ -19,6 +24,18 @@ describe("renderWatcherFooter", () => {
 
   it("omits unavailable duration", () => {
     expect(renderWatcherFooter({ ...status, durationMs: null })).toBe("watcher: passed #7");
+  });
+
+  it("places watcher below editor", () => {
+    expect(WATCHER_WIDGET_OPTIONS).toEqual({ placement: "belowEditor" });
+  });
+
+  it("right-aligns status text within available width", () => {
+    expect(rightAlignWatcherText("watcher: passed", 20)).toBe("     watcher: passed");
+  });
+
+  it("clips status text to narrow available width", () => {
+    expect(rightAlignWatcherText("watcher: passed", 8)).toBe("watcher:");
   });
 
   it.each([

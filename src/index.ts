@@ -1,4 +1,4 @@
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import {
   formatStatus,
@@ -12,7 +12,13 @@ import { readConfig } from "./infra/config.js";
 import { worktreeFingerprint } from "./infra/fingerprint.js";
 import { createFailureNotifier } from "./domain/failure-notifier.js";
 import { recordsAgentActivity } from "./domain/activity.js";
-import { renderWatcherFooter, watcherStatusColor } from "./domain/status-presentation.js";
+import {
+  renderWatcherFooter,
+  rightAlignWatcherText,
+  WATCHER_WIDGET_OPTIONS,
+  watcherStatusColor,
+  type WatcherStatusColor,
+} from "./domain/status-presentation.js";
 import {
   clearPinnedResponder,
   readResponder,
@@ -52,14 +58,11 @@ export default function funzzyStatus(pi: ExtensionAPI) {
       polling = true;
       try {
         const status = await queryStatus(config.socketPath);
-        ctx.ui.setStatus(
-          STATUS_KEY,
-          ctx.ui.theme.fg(watcherStatusColor(status.state), renderWatcherFooter(status)),
-        );
+        setWatcherWidget(ctx, renderWatcherFooter(status), watcherStatusColor(status.state));
         const responder = await readResponder(config.socketPath);
         notifyFailure?.(status, ctx.isIdle(), responder?.sessionId ?? null);
       } catch {
-        ctx.ui.setStatus(STATUS_KEY, ctx.ui.theme.fg("warning", "watcher: unavailable"));
+        setWatcherWidget(ctx, "watcher: unavailable", "warning");
       } finally {
         polling = false;
       }
@@ -90,7 +93,7 @@ export default function funzzyStatus(pi: ExtensionAPI) {
     pollStatus = undefined;
     activitySocketPath = undefined;
     notifyFailure = undefined;
-    ctx.ui.setStatus(STATUS_KEY, undefined);
+    ctx.ui.setWidget(STATUS_KEY, undefined);
   });
 
   pi.registerTool({
@@ -303,6 +306,17 @@ export default function funzzyStatus(pi: ExtensionAPI) {
       }
     },
   });
+}
+
+function setWatcherWidget(ctx: ExtensionContext, text: string, color: WatcherStatusColor): void {
+  ctx.ui.setWidget(
+    STATUS_KEY,
+    (_tui, theme) => ({
+      render: (width) => [theme.fg(color, rightAlignWatcherText(text, width))],
+      invalidate: () => {},
+    }),
+    WATCHER_WIDGET_OPTIONS,
+  );
 }
 
 function formatTargets(targets: FunzzyTarget[]): string {

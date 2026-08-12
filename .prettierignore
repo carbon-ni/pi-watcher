@@ -1,6 +1,8 @@
 coverage
 node_modules
 .direnv
+.pi
+.tmp
 package-lock.json
 flake.lock
 .watch.yaml

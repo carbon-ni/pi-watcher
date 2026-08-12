@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { renderWatcherFooter } from "./status-presentation.js";
+import { renderWatcherFooter, watcherStatusColor } from "./status-presentation.js";
 import type { WatcherStatus } from "./watcher.js";
 
 const status: WatcherStatus = {
@@ -19,5 +19,15 @@ describe("renderWatcherFooter", () => {
 
   it("omits unavailable duration", () => {
     expect(renderWatcherFooter({ ...status, durationMs: null })).toBe("watcher: passed #7");
+  });
+
+  it.each([
+    ["passed", "success"],
+    ["failed", "error"],
+    ["running", "accent"],
+    ["idle", "muted"],
+    ["cancelled", "warning"],
+  ] as const)("maps %s status to %s color", (state, color) => {
+    expect(watcherStatusColor(state)).toBe(color);
   });
 });

@@ -3,3 +3,5 @@ node_modules
 .direnv
 package-lock.json
 flake.lock
+.watch.yaml
+.watch.yml

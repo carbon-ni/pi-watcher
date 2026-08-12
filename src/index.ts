@@ -12,7 +12,7 @@ import { readConfig } from "./infra/config.js";
 import { worktreeFingerprint } from "./infra/fingerprint.js";
 import { createFailureNotifier } from "./domain/failure-notifier.js";
 import { recordsAgentActivity } from "./domain/activity.js";
-import { renderWatcherFooter } from "./domain/status-presentation.js";
+import { renderWatcherFooter, watcherStatusColor } from "./domain/status-presentation.js";
 import {
   clearPinnedResponder,
   readResponder,
@@ -52,7 +52,10 @@ export default function funzzyStatus(pi: ExtensionAPI) {
       polling = true;
       try {
         const status = await queryStatus(config.socketPath);
-        ctx.ui.setStatus(STATUS_KEY, renderWatcherFooter(status));
+        ctx.ui.setStatus(
+          STATUS_KEY,
+          ctx.ui.theme.fg(watcherStatusColor(status.state), renderWatcherFooter(status)),
+        );
         const responder = await readResponder(config.socketPath);
         notifyFailure?.(status, ctx.isIdle(), responder?.sessionId ?? null);
       } catch {

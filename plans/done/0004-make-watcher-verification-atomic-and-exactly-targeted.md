@@ -1,7 +1,7 @@
 ---
 id: TASK-0004
 title: Make watcher verification atomic and exactly targeted
-status: todo
+status: done
 depends_on: [TASK-0002]
 priority: high
 tags: [typescript, application, tools, verification, freshness, tdd]

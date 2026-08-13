@@ -42,4 +42,4 @@ pi install -l /absolute/path/to/pi-watcher
 
 Pi extensions execute with full user permissions. Review code before loading package.
 
-See [Architecture](docs/ARCHITECTURE.md) and [Development](DEVELOPMENT.md).
+See [Architecture](docs/ARCHITECTURE.md), [agent feedback contract](docs/AGENT-FEEDBACK-CONTRACT.md), and [Development](DEVELOPMENT.md).

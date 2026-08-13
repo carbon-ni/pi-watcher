@@ -1,6 +1,7 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
-import { requestStableRun, waitForRun } from "./application/stable-run.js";
+import { waitForRun } from "./application/stable-run.js";
+import { requestVerifiedRun } from "./application/verify.js";
 import { recordsAgentActivity } from "./domain/activity.js";
 import { createFailureNotifier } from "./domain/failure-notifier.js";
 import { renderWatcherFooter, watcherStatusColor } from "./domain/status-presentation.js";
@@ -8,6 +9,7 @@ import { formatTargets } from "./domain/targets-presentation.js";
 import { formatStatus, listTargets, queryStatus, requestRun } from "./infra/client.js";
 import { CapabilityCache, loadCapabilities } from "./infra/capabilities.js";
 import { createPollingPort, createSubscriptionPort } from "./infra/observer.js";
+import { createAtomicVerifyPort, createLegacyVerifyPort } from "./infra/verify.js";
 import { readConfig } from "./infra/config.js";
 import { worktreeFingerprint } from "./infra/fingerprint.js";
 import {
@@ -55,8 +57,19 @@ export default function funzzyStatus(pi: ExtensionAPI) {
     formatStatus,
     listTargets,
     formatTargets,
-    requestRun,
-    requestStableRun,
+    verifyRequest: async (config, request, fingerprint, signal) => {
+      const profile = await loadCapabilities(config.socketPath, capabilityCache);
+      const port =
+        profile.features.atomicAwait && profile.features.correlatedSnapshots
+          ? createAtomicVerifyPort(config.socketPath, profile.instance.token)
+          : createLegacyVerifyPort({
+              socketPath: config.socketPath,
+              pollIntervalMs: Math.min(config.pollIntervalMs, 250),
+              requestRun,
+              queryStatus,
+            });
+      return requestVerifiedRun(request, { port, fingerprint, signal });
+    },
     worktreeFingerprint,
   });
 

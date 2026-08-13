@@ -1,9 +1,11 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import type { WatcherStatus, WatcherTarget } from "./domain/watcher.js";
+import type { WatcherVerification, WatcherVerifyRequest } from "./domain/verification.js";
+import { formatVerification, selectTarget } from "./domain/verification.js";
 import type { RequireTrustedConfig } from "./trusted-config.js";
-import type { StableRunOptions } from "./application/stable-run.js";
 import type { Exec } from "./infra/fingerprint.js";
+import type { FunzzyConfig } from "./infra/config.js";
 
 export interface ToolDeps {
   requireTrustedConfig: RequireTrustedConfig;
@@ -19,8 +21,12 @@ export interface ToolDeps {
   formatStatus: (status: WatcherStatus) => string;
   listTargets: (socketPath: string, timeoutMs?: number) => Promise<WatcherTarget[]>;
   formatTargets: (targets: WatcherTarget[]) => string;
-  requestRun: (socketPath: string, target: string) => Promise<number>;
-  requestStableRun: (options: StableRunOptions) => Promise<WatcherStatus>;
+  verifyRequest: (
+    config: FunzzyConfig,
+    request: WatcherVerifyRequest,
+    fingerprint: () => Promise<string>,
+    signal?: AbortSignal,
+  ) => Promise<WatcherVerification>;
   worktreeFingerprint: (cwd: string, exec: Exec) => Promise<string>;
 }
 
@@ -98,46 +104,61 @@ export function registerTools(pi: ExtensionAPI, deps: ToolDeps): void {
     name: "watcher_verify",
     label: "Watcher Verify",
     description:
-      "Run a named Funzzy target externally and return only its compact final result; use watcher_targets to discover names",
+      "Run the exact named Funzzy target and return its terminal result with freshness proof; use watcher_targets to discover exact names",
     promptSnippet: "Run the external Funzzy final verification gate",
     promptGuidelines: [
-      "Use watcher_verify for final verification when .watch.yaml configures on.socket; accept a pass only when its worktree fingerprint remains unchanged.",
+      "Select targets by exact name: substring ambiguity returns candidates instead of running work.",
+      "Accept green only when the watcher instance is continuous, the snapshot is fresh, and the worktree fingerprint is unchanged.",
     ],
     parameters: Type.Object({
-      target: Type.Optional(Type.String({ description: "Funzzy task-name substring" })),
+      target: Type.Optional(Type.String({ description: "Exact Funzzy target name" })),
+      matchMode: Type.Optional(
+        Type.Union([
+          Type.Literal("exact", { description: "Only exact target names match" }),
+          Type.Literal("substring", {
+            description: "Allow one unambiguous substring match (explicit opt-in)",
+          }),
+        ]),
+      ),
       timeoutSeconds: Type.Optional(Type.Integer({ minimum: 1, maximum: 900 })),
     }),
     async execute(_toolCallId, params, signal, _onUpdate, ctx) {
       const config = await deps.requireTrustedConfig(ctx);
+      const targets = await deps.listTargets(config.socketPath);
+      const requested = params.target ?? "@agent-final";
+      const matchMode = params.matchMode === "substring" ? "substring" : "exact";
+      const selection = selectTarget(targets, requested, matchMode);
+      if (selection.kind === "missing") {
+        const candidates =
+          selection.candidates.length > 0 ? `; candidates: ${selection.candidates.join(", ")}` : "";
+        throw new Error(`No exact Funzzy target named "${requested}"${candidates}`);
+      }
+      if (selection.kind === "ambiguous") {
+        throw new Error(
+          `Funzzy target "${requested}" is ambiguous; matches: ${selection.candidates.join(", ")}. Pass the exact target name.`,
+        );
+      }
 
       const fingerprint = () =>
         deps.worktreeFingerprint(ctx.cwd, (command, args, options) =>
           pi.exec(command, args, { ...options, signal }),
         );
-      const before = await fingerprint();
-      const target = params.target ?? "@agent-final";
-      const timeoutMs = (params.timeoutSeconds ?? 120) * 1_000;
-      const status = await deps.requestStableRun({
-        timeoutMs,
-        request: () => deps.requestRun(config.socketPath, target),
-        readStatus: () => deps.queryStatus(config.socketPath),
-        isWorktreeCurrent: async () => (await fingerprint()) === before,
-        pollIntervalMs: Math.min(config.pollIntervalMs, 250),
-      });
-      const after = await fingerprint();
+      const verification = await deps.verifyRequest(
+        config,
+        {
+          target: selection.target.name,
+          matchMode,
+          timeoutMs: (params.timeoutSeconds ?? 120) * 1_000,
+        },
+        fingerprint,
+        signal,
+      );
 
-      if (before !== after) {
-        throw new Error(
-          `STALE gen=${status.generation}: worktree changed during Funzzy verification`,
-        );
-      }
-      if (status.state !== "passed") throw new Error(deps.formatStatus(status));
+      if (verification.reason !== "passed") throw new Error(formatVerification(verification));
 
       return {
-        content: [
-          { type: "text", text: `${deps.formatStatus(status)} fingerprint=${after.slice(0, 12)}` },
-        ],
-        details: { ...status, fingerprint: after },
+        content: [{ type: "text", text: formatVerification(verification) }],
+        details: verification,
       };
     },
   });

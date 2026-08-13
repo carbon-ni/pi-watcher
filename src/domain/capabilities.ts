@@ -13,6 +13,8 @@ import {
 export { WatcherProtocolError } from "./protocol.js";
 export type { WatcherExecutionState } from "./watcher.js";
 
+import type { WatcherStatus } from "./watcher.js";
+
 /**
  * Correlated snapshot vocabulary (contract §1, §3):
  * an instance is one Funzzy process, a batch groups the tasks scheduled for
@@ -188,6 +190,21 @@ export function decodeWatcherCorrelatedSnapshot(value: unknown): WatcherCorrelat
 /** Policy entry point: whether a negotiated profile supports a method. */
 export function hasMethod(profile: WatcherCapabilityProfile, method: string): boolean {
   return profile.methods.includes(method);
+}
+
+/**
+ * Project a correlated snapshot onto the compatibility `WatcherStatus` shape
+ * so footer and failure consumers can read one normalized status.
+ */
+export function snapshotToStatus(snapshot: WatcherCorrelatedSnapshot): WatcherStatus {
+  return {
+    generation: snapshot.generation,
+    state: snapshot.state,
+    trigger: snapshot.trigger,
+    commands: snapshot.commands,
+    durationMs: snapshot.durationMs,
+    failures: snapshot.failures,
+  };
 }
 
 function readWatcherInstance(object: Record<string, unknown>, what: string): WatcherInstance {

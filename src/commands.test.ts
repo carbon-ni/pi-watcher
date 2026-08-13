@@ -46,7 +46,10 @@ vi.mock("./infra/client.js", () => ({
   listTargets,
   queryStatus,
   requestRun,
+  requestRunAtomic: vi.fn(),
   FunzzyRpcError: class FunzzyRpcError extends Error {},
+  FunzzyRequestTimeoutError: class FunzzyRequestTimeoutError extends Error {},
+  FunzzyDisconnectError: class FunzzyDisconnectError extends Error {},
   queryCapabilities: vi.fn(),
 }));
 vi.mock("./infra/capabilities.js", () => ({

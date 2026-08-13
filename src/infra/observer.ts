@@ -4,6 +4,7 @@ import type { Socket } from "node:net";
 import type { ObserverPort } from "../application/observer.js";
 import {
   decodeWatcherCorrelatedSnapshot,
+  snapshotToStatus,
   type WatcherCorrelatedSnapshot,
 } from "../domain/capabilities.js";
 import type { WatcherObservation } from "../domain/observation.js";
@@ -99,14 +100,7 @@ function observationFromSnapshot(
 ): WatcherObservation {
   return {
     sequence,
-    status: {
-      generation: snapshot.generation,
-      state: snapshot.state,
-      trigger: snapshot.trigger,
-      commands: snapshot.commands,
-      durationMs: snapshot.durationMs,
-      failures: snapshot.failures,
-    },
+    status: snapshotToStatus(snapshot),
     source: "subscription",
     freshness: snapshot.freshness,
   };

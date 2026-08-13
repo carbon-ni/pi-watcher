@@ -44,7 +44,7 @@ Run `/watcher-disconnect` to opt the current Pi session out of the watcher: obse
 
 `watcher_status` accepts `wait`, `timeoutSeconds`, and `updateIntervalSeconds` (default: 5). Waiting keeps the tool call pending without blocking Pi's Node event loop; intermediate updates stay in the tool UI.
 
-`watcher_verify` fingerprints tracked changes and untracked file contents before and after the requested run. It retries a superseded run only while fingerprint remains unchanged and rejects a pass if worktree changed during verification.
+`watcher_verify` selects targets by exact name by default — substring ambiguity returns candidates instead of running work — and runs one atomic verification: it fingerprints tracked changes and untracked file contents before and after the run, accepts green only when the watcher instance is continuous, the snapshot is fresh, no newer batch is pending, and the fingerprints match, and retries a superseded run only while the fingerprint is unchanged and only a bounded number of times. On the legacy polling path it labels outcomes `polled` instead of pretending atomic guarantees.
 
 The watcher remains an independent process. Status reads retry transient connection failures and interrupted responses for request timeout, then fail closed instead of reporting stale pass. Run requests are never retried after connection because they are not idempotent.
 

@@ -10,6 +10,7 @@ import {
   decodeWatcherCapabilities,
   type WatcherCapabilityProfile,
 } from "../domain/capabilities.js";
+import { decodeAtomicRunResult, type AtomicRunResult } from "../domain/verification.js";
 import {
   decodeWatcherRun,
   decodeWatcherStatus,
@@ -54,6 +55,22 @@ export class FunzzyRpcError extends Error {
   }
 }
 
+/** Request or socket wait exceeded its deadline without a response. */
+export class FunzzyRequestTimeoutError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "FunzzyRequestTimeoutError";
+  }
+}
+
+/** Socket closed, connection refused, or retries exhausted. */
+export class FunzzyDisconnectError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "FunzzyDisconnectError";
+  }
+}
+
 export function queryCapabilities(
   socketPath: string,
   timeoutMs = 1_000,
@@ -64,6 +81,25 @@ export function queryCapabilities(
     timeoutMs,
     true,
     decodeWatcherCapabilities,
+  );
+}
+
+/**
+ * Atomic run-and-await (agreed additive contract): one server operation
+ * returns the requested generation plus its terminal correlated snapshot.
+ * Never retried after connection because scheduling is not idempotent.
+ */
+export function requestRunAtomic(
+  socketPath: string,
+  target: string,
+  timeoutMs = 120_000,
+): Promise<AtomicRunResult> {
+  return sendRequest(
+    socketPath,
+    { jsonrpc: "2.0", id: "run", method: "run", params: { target, wait: true } },
+    timeoutMs,
+    false,
+    decodeAtomicRunResult,
   );
 }
 
@@ -134,7 +170,7 @@ async function sendRequest<T>(
 
   const reason = lastConnectionError ? `: ${lastConnectionError.message}` : "";
   debugLog(`connection failed for ${socketPath} after ${retries} retries${reason}`);
-  throw new Error(`Funzzy unavailable after ${timeoutMs}ms${reason}`);
+  throw new FunzzyDisconnectError(`Funzzy unavailable after ${timeoutMs}ms${reason}`);
 }
 
 function sendRequestOnce<T>(
@@ -158,7 +194,7 @@ function sendRequestOnce<T>(
     };
 
     socket.setTimeout(timeoutMs, () =>
-      fail(new Error(`Funzzy request timed out after ${timeoutMs}ms`)),
+      fail(new FunzzyRequestTimeoutError(`Funzzy request timed out after ${timeoutMs}ms`)),
     );
     socket.once("error", (error) => {
       if (!connected && isRetryableSocketError(error)) {
@@ -190,7 +226,12 @@ function sendRequestOnce<T>(
         if (parsed.jsonrpc !== "2.0") {
           throw new Error(`Unsupported Funzzy JSON-RPC version: ${parsed.jsonrpc}`);
         }
-        if (parsed.error) throw new FunzzyRpcError(parsed.error.code, formatRpcError(parsed.error));
+        if (parsed.error)
+          throw new FunzzyRpcError(
+            parsed.error.code,
+            formatRpcError(parsed.error),
+            parsed.error.data,
+          );
         if (parsed.result === undefined) throw new Error("Funzzy response has no result");
         const decoded = decode(parsed.result);
         settled = true;
@@ -202,7 +243,9 @@ function sendRequestOnce<T>(
     });
     socket.once("end", () => {
       if (settled) return;
-      const error = new Error("Funzzy closed the socket without a complete response");
+      const error = new FunzzyDisconnectError(
+        "Funzzy closed the socket without a complete response",
+      );
       fail(retryInterrupted ? new RetryableRequestError(error) : error);
     });
   });

@@ -4,6 +4,7 @@ import { registerTools } from "./tools.js";
 import { createRequireTrustedConfig } from "./trusted-config.js";
 import { formatStatus } from "./infra/client.js";
 import { formatTargets } from "./domain/targets-presentation.js";
+import type { WatcherVerification } from "./domain/verification.js";
 import type { WatcherStatus, WatcherTarget } from "./domain/watcher.js";
 
 const CONFIG = { socketPath: "/tmp/funzzy.sock", pollIntervalMs: 1_000 };
@@ -17,7 +18,10 @@ const STATUS: WatcherStatus = {
   failures: [],
 };
 
-const TARGETS: WatcherTarget[] = [{ name: "lint", commands: ["npm run lint"] }];
+const TARGETS: WatcherTarget[] = [
+  { name: "@agent-final", commands: ["make all"] },
+  { name: "lint", commands: ["npm run lint"] },
+];
 
 type RegisteredToolCapture = {
   name: string;
@@ -49,6 +53,23 @@ function createPi() {
 }
 
 function createDeps(overrides: Record<string, unknown> = {}) {
+  const verification: WatcherVerification = {
+    reason: "passed",
+    target: "lint",
+    matchMode: "exact",
+    instance: null,
+    generation: 7,
+    freshness: "polled",
+    source: "polled",
+    fingerprint: "abc123",
+    fingerprintBefore: "abc123",
+    state: "passed",
+    durationMs: 42,
+    failures: [],
+    pending: null,
+    supersedingRunId: null,
+    attemptCount: 1,
+  };
   return {
     requireTrustedConfig: createRequireTrustedConfig(vi.fn().mockResolvedValue(CONFIG)),
     queryStatus: vi.fn().mockResolvedValue(STATUS),
@@ -56,8 +77,7 @@ function createDeps(overrides: Record<string, unknown> = {}) {
     formatStatus,
     listTargets: vi.fn().mockResolvedValue(TARGETS),
     formatTargets,
-    requestRun: vi.fn().mockResolvedValue(10),
-    requestStableRun: vi.fn().mockResolvedValue(STATUS),
+    verifyRequest: vi.fn().mockResolvedValue(verification),
     worktreeFingerprint: vi.fn().mockResolvedValue("abc123"),
     ...overrides,
   };
@@ -197,7 +217,12 @@ describe("watcher_targets", () => {
 
     expect(listTargets).toHaveBeenCalledWith(CONFIG.socketPath);
     expect(result).toEqual({
-      content: [{ type: "text", text: "- lint: npm run lint" }],
+      content: [
+        {
+          type: "text",
+          text: "- @agent-final: make all\n- lint: npm run lint",
+        },
+      ],
       details: { targets: TARGETS },
     });
   });
@@ -210,34 +235,40 @@ describe("watcher_verify", () => {
 
     const result = await runTool(registeredTool(tools, "watcher_verify"), {}, trustedCtx());
 
-    expect(result).toEqual({
-      content: [
-        {
-          type: "text",
-          text: "PASS gen=7 tests=make all duration=42ms trigger=src/index.ts fingerprint=abc123",
-        },
-      ],
-      details: { ...STATUS, fingerprint: "abc123" },
+    expect(result.content).toEqual([
+      {
+        type: "text",
+        text: "PASS gen=7 target=lint duration=42ms fingerprint=abc123",
+      },
+    ]);
+    expect(result.details).toMatchObject({
+      reason: "passed",
+      target: "lint",
+      fingerprint: "abc123",
     });
   });
 
-  it("requests the named target by default", async () => {
+  it("selects the exact target name by default and passes the timeout", async () => {
     const { pi, tools } = createPi();
-    const requestRun = vi.fn().mockResolvedValue(10);
-    const requestStableRun = vi.fn(async (options: { request: () => Promise<number> }) => {
-      await options.request();
-      return STATUS;
+    const verifyRequest = vi.fn().mockResolvedValue({
+      reason: "passed",
+      fingerprint: "abc123",
+      durationMs: null,
     });
-    registerTools(pi as never, createDeps({ requestRun, requestStableRun }));
+    registerTools(pi as never, createDeps({ verifyRequest }));
 
     await runTool(registeredTool(tools, "watcher_verify"), {}, trustedCtx());
 
-    expect(requestRun).toHaveBeenCalledWith(CONFIG.socketPath, "@agent-final");
+    expect(verifyRequest).toHaveBeenCalledWith(
+      CONFIG,
+      { target: "@agent-final", matchMode: "exact", timeoutMs: 120_000 },
+      expect.any(Function),
+      undefined,
+    );
   });
 
-  it("runs the named target with live status and fingerprint reads", async () => {
+  it("runs the exact target and fingerprint reads through Pi exec", async () => {
     const { pi, tools } = createPi();
-    const requestRun = vi.fn().mockResolvedValue(10);
     const worktreeFingerprint = vi.fn(
       async (
         _cwd: string,
@@ -251,56 +282,85 @@ describe("watcher_verify", () => {
         return "abc123";
       },
     );
-    const requestStableRun = vi.fn(
-      async (options: {
-        request: () => Promise<number>;
-        readStatus: () => Promise<WatcherStatus>;
-        isWorktreeCurrent: () => Promise<boolean>;
-      }) => {
-        await options.request();
-        await options.readStatus();
-        await options.isWorktreeCurrent();
-        return STATUS;
+    const verifyRequest = vi.fn(
+      async (_config: unknown, _request: unknown, fingerprint: () => Promise<string>) => {
+        await fingerprint();
+        return { reason: "passed", fingerprint: "abc123", durationMs: null };
       },
     );
-    registerTools(pi as never, createDeps({ requestRun, worktreeFingerprint, requestStableRun }));
+    registerTools(pi as never, createDeps({ worktreeFingerprint, verifyRequest }));
 
-    const result = await runTool(
-      registeredTool(tools, "watcher_verify"),
-      { target: "lint" },
-      trustedCtx(),
-    );
+    await runTool(registeredTool(tools, "watcher_verify"), { target: "lint" }, trustedCtx());
 
-    expect(requestRun).toHaveBeenCalledWith(CONFIG.socketPath, "lint");
     expect(pi.exec).toHaveBeenCalledWith(
       "git",
       ["status"],
       expect.objectContaining({ cwd: "/project", timeout: 1_000 }),
     );
-    expect(result.content[0]!.text).toBe(
-      "PASS gen=7 tests=make all duration=42ms trigger=src/index.ts fingerprint=abc123",
+  });
+
+  it("rejects a requested name that matches no exact target", async () => {
+    const { pi, tools } = createPi();
+    const listTargets = vi
+      .fn()
+      .mockResolvedValue([{ name: "final checks @agent-final", commands: ["make all"] }]);
+    registerTools(pi as never, createDeps({ listTargets }));
+
+    await expect(
+      runTool(registeredTool(tools, "watcher_verify"), {}, trustedCtx()),
+    ).rejects.toThrow(
+      'No exact Funzzy target named "@agent-final"; candidates: final checks @agent-final',
     );
   });
 
-  it("rejects a worktree that changed during verification", async () => {
+  it("never picks an ambiguous substring match silently", async () => {
     const { pi, tools } = createPi();
-    const worktreeFingerprint = vi.fn().mockResolvedValueOnce("before").mockResolvedValue("after");
-    registerTools(pi as never, createDeps({ worktreeFingerprint }));
+    const listTargets = vi.fn().mockResolvedValue([
+      { name: "final checks @agent-final", commands: ["make all"] },
+      { name: "final checks @agent-slow", commands: ["make integration"] },
+    ]);
+    const verifyRequest = vi.fn();
+    registerTools(pi as never, createDeps({ listTargets, verifyRequest }));
 
     await expect(
-      runTool(registeredTool(tools, "watcher_verify"), {}, trustedCtx()),
-    ).rejects.toThrow("STALE gen=7: worktree changed during Funzzy verification");
+      runTool(
+        registeredTool(tools, "watcher_verify"),
+        { target: "final checks", matchMode: "substring" },
+        trustedCtx(),
+      ),
+    ).rejects.toThrow(/ambiguous/);
+    expect(verifyRequest).not.toHaveBeenCalled();
   });
 
-  it("rejects a failed verification run", async () => {
+  it("rejects a failed verification run with evidence", async () => {
     const { pi, tools } = createPi();
-    const requestStableRun = vi
-      .fn()
-      .mockResolvedValue({ ...STATUS, state: "failed", failures: ["boom"] });
-    registerTools(pi as never, createDeps({ requestStableRun }));
+    const verifyRequest = vi.fn().mockResolvedValue({
+      reason: "failed",
+      target: "lint",
+      generation: 7,
+      failures: ["boom"],
+      fingerprint: "abc123",
+    });
+    registerTools(pi as never, createDeps({ verifyRequest }));
 
     await expect(
       runTool(registeredTool(tools, "watcher_verify"), {}, trustedCtx()),
-    ).rejects.toThrow(/FAIL gen=7 failures=1/);
+    ).rejects.toThrow(/FAIL gen=7 target=lint failures=1/);
+  });
+
+  it("rejects a stale verification with the explicit reason", async () => {
+    const { pi, tools } = createPi();
+    const verifyRequest = vi.fn().mockResolvedValue({
+      reason: "stale",
+      target: "lint",
+      generation: 7,
+      failures: [],
+      fingerprint: "after",
+    });
+    registerTools(pi as never, createDeps({ verifyRequest }));
+
+    await expect(
+      runTool(registeredTool(tools, "watcher_verify"), {}, trustedCtx()),
+    ).rejects.toThrow("STALE gen=7 target=lint");
   });
 });

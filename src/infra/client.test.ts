@@ -133,6 +133,96 @@ test("requests a named Funzzy target", async () => {
   }
 });
 
+test("fails closed on a malformed status payload", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "funzzy-extension-"));
+  const socketPath = join(directory, "control.sock");
+  const server = createServer((socket) => {
+    socket.once("data", () => {
+      // Wrong-type generation, exactly as a broken protocol change would emit.
+      socket.end(
+        `${JSON.stringify({
+          jsonrpc: "2.0",
+          id: "status",
+          result: { ...passed, generation: "4" },
+        })}\n`,
+      );
+    });
+  });
+  await new Promise<void>((resolve) => server.listen(socketPath, resolve));
+
+  try {
+    await assert.rejects(
+      () => queryStatus(socketPath, 500),
+      /"generation" must be a number, got "4"/,
+    );
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => (error ? reject(error) : resolve())),
+    );
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("fails closed on a malformed targets payload", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "funzzy-extension-"));
+  const socketPath = join(directory, "control.sock");
+  const server = createServer((socket) => {
+    socket.once("data", () => {
+      // A target without its required name.
+      socket.end(
+        `${JSON.stringify({
+          jsonrpc: "2.0",
+          id: "targets",
+          result: [{ commands: ["cargo test"] }],
+        })}\n`,
+      );
+    });
+  });
+  await new Promise<void>((resolve) => server.listen(socketPath, resolve));
+
+  try {
+    await assert.rejects(
+      () => listTargets(socketPath, 500),
+      /target at index 0: "name" is required/,
+    );
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => (error ? reject(error) : resolve())),
+    );
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("fails closed on a malformed run payload", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "funzzy-extension-"));
+  const socketPath = join(directory, "control.sock");
+  const server = createServer((socket) => {
+    socket.once("data", () => {
+      // Wrong-type run id.
+      socket.end(
+        `${JSON.stringify({
+          jsonrpc: "2.0",
+          id: "run",
+          result: { runId: "7" },
+        })}\n`,
+      );
+    });
+  });
+  await new Promise<void>((resolve) => server.listen(socketPath, resolve));
+
+  try {
+    await assert.rejects(
+      () => requestRun(socketPath, "@agent-final", 500),
+      /"runId" must be a number, got "7"/,
+    );
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => (error ? reject(error) : resolve())),
+    );
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 test("reports JSON-RPC errors with code and message", async () => {
   const directory = await mkdtemp(join(tmpdir(), "funzzy-extension-"));
   const socketPath = join(directory, "control.sock");

@@ -1,6 +1,18 @@
 import { createConnection } from "node:net";
 
-import type { WatcherStatus, WatcherTarget } from "../domain/watcher.js";
+// Wire contract: the Funzzy control server (Rust `src/control.rs`) emits
+// JSON-RPC 2.0 with `status` -> ControlState (serde camelCase), `targets` ->
+// ControlTarget list, and `run` -> { "runId": generation }. Every result is
+// decoded from `unknown` (see ../domain/watcher.ts) so protocol drift fails
+// closed with an actionable error instead of a generic cast. Change the Rust
+// serializer and this decoder together.
+import {
+  decodeWatcherRun,
+  decodeWatcherStatus,
+  decodeWatcherTargets,
+  type WatcherStatus,
+  type WatcherTarget,
+} from "../domain/watcher.js";
 
 export type {
   WatcherStatus as FunzzyStatus,
@@ -15,27 +27,30 @@ interface RpcError {
   data?: unknown;
 }
 
-interface ControlResponse<T> {
+interface ControlResponse {
   jsonrpc: "2.0";
   id: string | number | null;
-  result?: T;
+  result?: unknown;
   error?: RpcError;
 }
 
 export function queryStatus(socketPath: string, timeoutMs = 1_000): Promise<FunzzyStatus> {
-  return sendRequest<FunzzyStatus>(
+  return sendRequest(
     socketPath,
     { jsonrpc: "2.0", id: "status", method: "status" },
     timeoutMs,
     true,
+    decodeWatcherStatus,
   );
 }
 
 export function listTargets(socketPath: string, timeoutMs = 1_000): Promise<FunzzyTarget[]> {
-  return sendRequest<FunzzyTarget[]>(
+  return sendRequest(
     socketPath,
     { jsonrpc: "2.0", id: "targets", method: "targets" },
     timeoutMs,
+    false,
+    decodeWatcherTargets,
   );
 }
 
@@ -44,19 +59,21 @@ export async function requestRun(
   target: string,
   timeoutMs = 1_000,
 ): Promise<number> {
-  const response = await sendRequest<{ runId: number }>(
+  return sendRequest(
     socketPath,
     { jsonrpc: "2.0", id: "run", method: "run", params: { target } },
     timeoutMs,
+    false,
+    decodeWatcherRun,
   );
-  return response.runId;
 }
 
 async function sendRequest<T>(
   socketPath: string,
   request: object,
   timeoutMs: number,
-  retryInterrupted = false,
+  retryInterrupted: boolean,
+  decode: (value: unknown) => T,
 ): Promise<T> {
   const deadline = Date.now() + timeoutMs;
   let lastConnectionError: Error | undefined;
@@ -69,6 +86,7 @@ async function sendRequest<T>(
         request,
         Math.max(1, deadline - Date.now()),
         retryInterrupted,
+        decode,
       );
       if (retries > 0) debugLog(`connected to ${socketPath} after ${retries} retries`);
       return result;
@@ -91,6 +109,7 @@ function sendRequestOnce<T>(
   request: object,
   timeoutMs: number,
   retryInterrupted: boolean,
+  decode: (value: unknown) => T,
 ): Promise<T> {
   return new Promise((resolve, reject) => {
     const socket = createConnection(socketPath);
@@ -134,15 +153,16 @@ function sendRequestOnce<T>(
       if (newline < 0 || settled) return;
 
       try {
-        const parsed = JSON.parse(response.slice(0, newline)) as ControlResponse<T>;
+        const parsed = JSON.parse(response.slice(0, newline)) as ControlResponse;
         if (parsed.jsonrpc !== "2.0") {
           throw new Error(`Unsupported Funzzy JSON-RPC version: ${parsed.jsonrpc}`);
         }
         if (parsed.error) throw new Error(formatRpcError(parsed.error));
         if (parsed.result === undefined) throw new Error("Funzzy response has no result");
+        const decoded = decode(parsed.result);
         settled = true;
         socket.end();
-        resolve(parsed.result);
+        resolve(decoded);
       } catch (error) {
         fail(error instanceof Error ? error : new Error(String(error)));
       }

@@ -86,6 +86,7 @@ export interface WatcherCorrelatedSnapshot {
   batchId: string;
   state: (typeof EXECUTION_STATES)[number];
   trigger: string | null;
+  commands: string[];
   tasks: WatcherTaskOutcome[];
   pending: number;
   freshness: WatcherFreshness;
@@ -162,6 +163,7 @@ export function decodeWatcherCorrelatedSnapshot(value: unknown): WatcherCorrelat
   const batchId = readRequiredString(object, "batchId", "correlated snapshot");
   const state = readExecutionState(object, "correlated snapshot");
   const trigger = readOptionalNullableString(object, "trigger");
+  const commands = readOptionalStringArray(object, "commands", "correlated snapshot");
   const tasks = readTaskOutcomes(object);
   const pending = readRequiredNumber(object, "pending", "correlated snapshot");
   const freshness = readFreshness(object);
@@ -174,6 +176,7 @@ export function decodeWatcherCorrelatedSnapshot(value: unknown): WatcherCorrelat
     batchId,
     state,
     trigger,
+    commands,
     tasks,
     pending,
     freshness,

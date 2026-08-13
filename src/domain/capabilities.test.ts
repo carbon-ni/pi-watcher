@@ -135,6 +135,7 @@ describe("decodeWatcherCorrelatedSnapshot", () => {
       batchId: "b-19",
       state: "passed",
       trigger: null,
+      commands: [],
       tasks: [],
       pending: 0,
       freshness: "current",
@@ -148,6 +149,7 @@ describe("decodeWatcherCorrelatedSnapshot", () => {
     expect(snapshot.instance.token).toBe("fz-7f3a");
     expect(snapshot.batchId).toBe("b-19");
     expect(snapshot.freshness).toBe("current");
+    expect(snapshot.commands).toEqual(["make all"]);
     expect(snapshot.tasks).toEqual([
       { id: "t-1", name: "test @agent-final", state: "passed", durationMs: 42 },
     ]);

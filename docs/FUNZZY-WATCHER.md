@@ -38,7 +38,9 @@ The extension records the latest Pi session before `bash`, `edit`, and `write` c
 
 Use `/watcher-responder claim` to pin failure handling to current Pi session. Pinned responder overrides automatic activity tracking until `/watcher-responder auto` restores it. `/watcher-responder status` shows current mode and session.
 
-Run `/watcher-disconnect` to opt the current Pi session out of the watcher: polling, the status bar entry, and activity attribution stop, so the session never becomes the responder and receives no watcher messages. If that session holds the pinned responder, the pin is released so other sessions can take over. The choice is persisted per project beside the socket and survives session restarts; `/watcher-connect` re-joins the session to the watcher.
+The extension observes watcher state through a push-driven lifecycle: one cancellable observation stream per connected Pi session, fed either by Funzzy's subscription snapshots (when negotiated capabilities support them) or by a non-overlapping status poll as the capability-gated legacy fallback. Legacy polling is visibly marked with a `(polled)` suffix in the status bar because its freshness guarantee is weaker than a subscription. The observer reconnects with bounded exponential backoff after transport drops, reports `watcher: unavailable` instead of hiding stale state, and is aborted on session shutdown, `/watcher-disconnect`, trust loss, or extension disposal.
+
+Run `/watcher-disconnect` to opt the current Pi session out of the watcher: observation, the status bar entry, and activity attribution stop, so the session never becomes the responder and receives no watcher messages. If that session holds the pinned responder, the pin is released so other sessions can take over. The choice is persisted per project beside the socket and survives session restarts; `/watcher-connect` re-joins the session to the watcher.
 
 `watcher_status` accepts `wait`, `timeoutSeconds`, and `updateIntervalSeconds` (default: 5). Waiting keeps the tool call pending without blocking Pi's Node event loop; intermediate updates stay in the tool UI.
 

@@ -46,6 +46,29 @@ vi.mock("./infra/client.js", () => ({
   listTargets,
   queryStatus,
   requestRun,
+  FunzzyRpcError: class FunzzyRpcError extends Error {},
+  queryCapabilities: vi.fn(),
+}));
+vi.mock("./infra/capabilities.js", () => ({
+  CapabilityCache: class CapabilityCache {
+    invalidate(): void {}
+  },
+  loadCapabilities: vi.fn().mockResolvedValue({
+    source: "legacy",
+    protocolVersion: "1.0",
+    schemaVersion: 1,
+    instance: { token: "", startedAtEpochMs: null },
+    methods: ["status", "targets", "run"],
+    optionalFields: [],
+    limits: { outputRetentionBytes: 0, maxResponseBytes: 65536, maxEvidenceLines: 40 },
+    features: {
+      atomicAwait: false,
+      subscription: false,
+      correlatedSnapshots: false,
+      outputRetrieval: false,
+      pendingWork: false,
+    },
+  }),
 }));
 vi.mock("./infra/ownership.js", () => ({
   clearPinnedResponder,
@@ -192,7 +215,10 @@ describe("funzzyStatus registration", () => {
 
     await handlers.get("session_start")?.({} as never, ctx as never);
 
-    expect(setStatus).toHaveBeenCalledWith("watcher-status", "success:watcher: passed #7 42ms");
+    expect(setStatus).toHaveBeenCalledWith(
+      "watcher-status",
+      "success:watcher: passed #7 42ms (polled)",
+    );
 
     await handlers.get("session_shutdown")?.({} as never, ctx as never);
     expect(setStatus).toHaveBeenLastCalledWith("watcher-status", undefined);

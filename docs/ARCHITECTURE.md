@@ -33,6 +33,7 @@ No module in `domain/` imports `application/`, `infra/`, or Pi. Application impo
 ### Application
 
 - `application/stable-run.ts`: waits for requested generation and retries superseded runs only while worktree stays current.
+- `application/observer.ts`: push-driven lifecycle observation with sequence dedupe and bounded reconnect.
 
 ### Infrastructure
 

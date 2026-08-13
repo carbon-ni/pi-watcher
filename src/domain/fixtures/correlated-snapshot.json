@@ -4,6 +4,7 @@
   "batchId": "b-19",
   "state": "passed",
   "trigger": "src/main.rs",
+  "commands": ["make all"],
   "tasks": [{ "id": "t-1", "name": "test @agent-final", "state": "passed", "durationMs": 42 }],
   "pending": 0,
   "freshness": "current",

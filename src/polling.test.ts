@@ -1,6 +1,13 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { createPollingLifecycle } from "./polling.js";
+import { createPollingLifecycle, type PollingDeps } from "./polling.js";
+import { createPollingPort, type QueryStatusFn } from "./infra/observer.js";
+import type { ObserverPort } from "./application/observer.js";
+import { decodeWatcherCapabilities } from "./domain/capabilities.js";
+import capabilitiesFixture from "./domain/fixtures/capabilities.json" with { type: "json" };
+import type { FunzzyConfig } from "./infra/config.js";
+import type { Responder } from "./infra/ownership.js";
+import type { WatcherCapabilityProfile } from "./domain/capabilities.js";
 import type { WatcherStatus } from "./domain/watcher.js";
 import { createFailureNotifier } from "./domain/failure-notifier.js";
 import { recordsAgentActivity } from "./domain/activity.js";
@@ -8,6 +15,7 @@ import { renderWatcherFooter, watcherStatusColor } from "./domain/status-present
 import { formatStatus } from "./infra/client.js";
 
 const CONFIG = { socketPath: "/tmp/funzzy.sock", pollIntervalMs: 1_000 };
+const NEGOTIATED_PROFILE = decodeWatcherCapabilities(capabilitiesFixture);
 
 const STATUS: WatcherStatus = {
   generation: 7,
@@ -18,11 +26,60 @@ const STATUS: WatcherStatus = {
   failures: [],
 };
 
-function createDeps(overrides: Record<string, unknown> = {}) {
-  return {
-    readConfig: vi.fn().mockResolvedValue(CONFIG),
+const SUBSCRIPTION_PORT_STUB: ObserverPort = {
+  async *open() {
+    yield { sequence: 1, status: STATUS, source: "subscription", freshness: "current" };
+  },
+};
+
+interface TestDeps extends PollingDeps {
+  queryStatus: ReturnType<typeof vi.fn<QueryStatusFn>>;
+  readConfig: ReturnType<typeof vi.fn<(cwd: string) => Promise<FunzzyConfig | null>>>;
+  loadCapabilities: ReturnType<
+    typeof vi.fn<(socketPath: string) => Promise<WatcherCapabilityProfile>>
+  >;
+  invalidateCapabilities: ReturnType<typeof vi.fn<() => void>>;
+  createSubscriptionPort: ReturnType<typeof vi.fn<(socketPath: string) => ObserverPort>>;
+  createPollingPort: ReturnType<
+    typeof vi.fn<(socketPath: string, pollIntervalMs: number) => ObserverPort>
+  >;
+  readResponder: ReturnType<typeof vi.fn<(socketPath: string) => Promise<Responder | null>>>;
+  recordAutomaticResponder: ReturnType<
+    typeof vi.fn<(socketPath: string, sessionId: string) => Promise<void>>
+  >;
+  isSessionDisconnected: ReturnType<
+    typeof vi.fn<(socketPath: string, sessionId: string) => Promise<boolean>>
+  >;
+}
+
+type Deps = TestDeps;
+
+function createDeps(overrides: Partial<Deps> = {}): Deps {
+  const queryStatus = vi.fn<QueryStatusFn>().mockResolvedValue(STATUS);
+  const deps: Deps = {
+    readConfig: vi.fn<(cwd: string) => Promise<FunzzyConfig | null>>().mockResolvedValue(CONFIG),
     createFailureNotifier,
-    queryStatus: vi.fn().mockResolvedValue(STATUS),
+    loadCapabilities: vi
+      .fn<(socketPath: string) => Promise<WatcherCapabilityProfile>>()
+      .mockResolvedValue({
+        source: "legacy",
+        protocolVersion: "1.0",
+        schemaVersion: 1,
+        instance: { token: "", startedAtEpochMs: null },
+        methods: ["status", "targets", "run"],
+        optionalFields: [],
+        limits: { outputRetentionBytes: 0, maxResponseBytes: 65536, maxEvidenceLines: 40 },
+        features: {
+          atomicAwait: false,
+          subscription: false,
+          correlatedSnapshots: false,
+          outputRetrieval: false,
+          pendingWork: false,
+        },
+      }),
+    invalidateCapabilities: vi.fn(),
+    createSubscriptionPort: vi.fn(() => SUBSCRIPTION_PORT_STUB),
+    createPollingPort: vi.fn(),
     readResponder: vi.fn().mockResolvedValue(null),
     recordsAgentActivity,
     recordAutomaticResponder: vi.fn().mockResolvedValue(undefined),
@@ -30,11 +87,15 @@ function createDeps(overrides: Record<string, unknown> = {}) {
     renderWatcherFooter,
     watcherStatusColor,
     formatStatus,
+    queryStatus,
     ...overrides,
   };
+  // The polling port must read through the (possibly overridden) queryStatus mock.
+  deps.createPollingPort = vi.fn((socketPath: string, pollIntervalMs: number) =>
+    createPollingPort(deps.queryStatus, socketPath, pollIntervalMs),
+  );
+  return deps;
 }
-
-type Deps = ReturnType<typeof createDeps>;
 
 function createHarness(overrides: Partial<Deps> = {}) {
   const deps = createDeps(overrides);
@@ -61,26 +122,54 @@ function createHarness(overrides: Partial<Deps> = {}) {
   return { ctx, deps, lifecycle, sendMessage, setStatus };
 }
 
+async function flush(): Promise<void> {
+  for (let round = 0; round < 10; round += 1) await Promise.resolve();
+}
+
 afterEach(() => {
   vi.clearAllTimers();
   vi.useRealTimers();
 });
 
 describe("session start", () => {
-  it("polls immediately and publishes the status bar", async () => {
-    vi.useFakeTimers();
+  it("observes immediately and publishes the status bar", async () => {
     const { ctx, deps, lifecycle, setStatus } = createHarness();
 
     await lifecycle.sessionStart({} as never, ctx as never);
 
     expect(deps.queryStatus).toHaveBeenCalledWith(CONFIG.socketPath);
-    expect(setStatus).toHaveBeenCalledWith("watcher-status", "success:watcher: passed #7 42ms");
-
-    await vi.advanceTimersByTimeAsync(CONFIG.pollIntervalMs);
-    expect(deps.queryStatus).toHaveBeenCalledTimes(2);
+    expect(setStatus).toHaveBeenCalledWith(
+      "watcher-status",
+      "success:watcher: passed #7 42ms (polled)",
+    );
   });
 
-  it("does not poll when the project is untrusted", async () => {
+  it("marks legacy polling in the footer and negotiates capabilities", async () => {
+    const { ctx, deps, lifecycle, setStatus } = createHarness();
+
+    await lifecycle.sessionStart({} as never, ctx as never);
+
+    expect(deps.loadCapabilities).toHaveBeenCalledWith(CONFIG.socketPath);
+    expect(setStatus).toHaveBeenCalledWith(
+      "watcher-status",
+      "success:watcher: passed #7 42ms (polled)",
+    );
+  });
+
+  it("uses the subscription port when capabilities support it", async () => {
+    const { ctx, deps, lifecycle, setStatus } = createHarness({
+      loadCapabilities: vi.fn().mockResolvedValue(NEGOTIATED_PROFILE),
+    });
+
+    await lifecycle.sessionStart({} as never, ctx as never);
+
+    expect(deps.createSubscriptionPort).toHaveBeenCalledWith(CONFIG.socketPath);
+    expect(deps.createPollingPort).not.toHaveBeenCalled();
+    // Subscription observations are not marked with the polled suffix.
+    expect(setStatus).toHaveBeenCalledWith("watcher-status", "success:watcher: passed #7 42ms");
+  });
+
+  it("does not observe when the project is untrusted", async () => {
     const { ctx, deps, lifecycle, setStatus } = createHarness();
     ctx.isProjectTrusted = () => false;
 
@@ -90,7 +179,7 @@ describe("session start", () => {
     expect(setStatus).not.toHaveBeenCalled();
   });
 
-  it("does not poll when on.socket is not configured", async () => {
+  it("does not observe when on.socket is not configured", async () => {
     const { ctx, deps, lifecycle, setStatus } = createHarness({
       readConfig: vi.fn().mockResolvedValue(null),
     });
@@ -101,7 +190,7 @@ describe("session start", () => {
     expect(setStatus).not.toHaveBeenCalled();
   });
 
-  it("does not poll when there is no UI", async () => {
+  it("does not observe when there is no UI", async () => {
     const { ctx, deps, lifecycle, setStatus } = createHarness();
     ctx.hasUI = false;
 
@@ -111,7 +200,7 @@ describe("session start", () => {
     expect(setStatus).not.toHaveBeenCalled();
   });
 
-  it("publishes unavailable watcher state when polling fails", async () => {
+  it("publishes unavailable watcher state when observation fails", async () => {
     const { ctx, deps, lifecycle, setStatus } = createHarness();
     deps.queryStatus.mockRejectedValueOnce(new Error("socket unavailable"));
 
@@ -120,7 +209,7 @@ describe("session start", () => {
     expect(setStatus).toHaveBeenCalledWith("watcher-status", "warning:watcher: unavailable");
   });
 
-  it("restarting the session keeps exactly one polling interval", async () => {
+  it("restarting the session keeps exactly one observation active", async () => {
     vi.useFakeTimers();
     const { ctx, deps, lifecycle } = createHarness();
 
@@ -128,6 +217,7 @@ describe("session start", () => {
     await lifecycle.sessionStart({} as never, ctx as never);
 
     await vi.advanceTimersByTimeAsync(CONFIG.pollIntervalMs);
+    // Session 1: immediate read. Session 2: immediate read + one interval read.
     expect(deps.queryStatus).toHaveBeenCalledTimes(3);
   });
 });
@@ -141,6 +231,7 @@ describe("failure delivery", () => {
     });
 
     await lifecycle.sessionStart({} as never, ctx as never);
+    await flush();
     expect(sendMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         customType: "funzzy-failure",
@@ -151,6 +242,7 @@ describe("failure delivery", () => {
     );
 
     await lifecycle.agentSettled();
+    await flush();
     expect(sendMessage).toHaveBeenCalledTimes(1);
   });
 
@@ -162,6 +254,7 @@ describe("failure delivery", () => {
     });
 
     await lifecycle.sessionStart({} as never, ctx as never);
+    await flush();
 
     expect(sendMessage).not.toHaveBeenCalled();
   });
@@ -198,7 +291,7 @@ describe("activity attribution", () => {
 });
 
 describe("session disconnect", () => {
-  it("does not poll when the session is disconnected", async () => {
+  it("does not observe when the session is disconnected", async () => {
     const { ctx, deps, lifecycle, setStatus } = createHarness({
       isSessionDisconnected: vi.fn().mockResolvedValue(true),
     });
@@ -209,7 +302,7 @@ describe("session disconnect", () => {
     expect(setStatus).toHaveBeenCalledWith("watcher-status", "muted:watcher: disconnected");
   });
 
-  it("stops polling and clears the status bar on disconnect", async () => {
+  it("stops observing and clears the status bar on disconnect", async () => {
     vi.useFakeTimers();
     const { ctx, deps, lifecycle, setStatus } = createHarness();
 
@@ -221,6 +314,15 @@ describe("session disconnect", () => {
 
     await vi.advanceTimersByTimeAsync(5_000);
     expect(deps.queryStatus.mock.calls.length).toBe(callsAtDisconnect);
+  });
+
+  it("invalidates capability negotiation on disconnect", async () => {
+    const { ctx, deps, lifecycle } = createHarness();
+
+    await lifecycle.sessionStart({} as never, ctx as never);
+    await lifecycle.disconnect(ctx as never);
+
+    expect(deps.invalidateCapabilities).toHaveBeenCalled();
   });
 
   it("disconnect is a no-op when nothing is running", async () => {
@@ -251,7 +353,7 @@ describe("session disconnect", () => {
     expect(deps.recordAutomaticResponder).not.toHaveBeenCalled();
   });
 
-  it("connect resumes polling after disconnect", async () => {
+  it("connect resumes observing after disconnect", async () => {
     vi.useFakeTimers();
     const { ctx, deps, lifecycle } = createHarness();
 
@@ -275,7 +377,10 @@ describe("session disconnect", () => {
     await lifecycle.connect(ctx as never);
 
     expect(deps.queryStatus).toHaveBeenCalledWith(CONFIG.socketPath);
-    expect(setStatus).toHaveBeenLastCalledWith("watcher-status", "success:watcher: passed #7 42ms");
+    expect(setStatus).toHaveBeenLastCalledWith(
+      "watcher-status",
+      "success:watcher: passed #7 42ms (polled)",
+    );
   });
 
   it("does not deliver new failures after disconnect", async () => {
@@ -286,16 +391,18 @@ describe("session disconnect", () => {
     });
 
     await lifecycle.sessionStart({} as never, ctx as never);
+    await flush();
     const callsAtDisconnect = sendMessage.mock.calls.length;
     await lifecycle.disconnect(ctx as never);
     await lifecycle.agentSettled();
+    await flush();
 
     expect(sendMessage.mock.calls.length).toBe(callsAtDisconnect);
   });
 });
 
 describe("session shutdown", () => {
-  it("stops polling, clears the status bar, and is idempotent", async () => {
+  it("stops observing, clears the status bar, and is idempotent", async () => {
     vi.useFakeTimers();
     const { ctx, deps, lifecycle, setStatus } = createHarness();
 
@@ -313,12 +420,12 @@ describe("session shutdown", () => {
 });
 
 describe("agent settled", () => {
-  it("re-polls current status", async () => {
+  it("does not trigger additional reads (push-driven)", async () => {
     const { ctx, deps, lifecycle } = createHarness();
     await lifecycle.sessionStart({} as never, ctx as never);
 
     await lifecycle.agentSettled();
 
-    expect(deps.queryStatus).toHaveBeenCalledTimes(2);
+    expect(deps.queryStatus).toHaveBeenCalledTimes(1);
   });
 });

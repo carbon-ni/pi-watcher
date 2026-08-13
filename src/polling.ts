@@ -8,12 +8,18 @@ import type { FunzzyConfig } from "./infra/config.js";
 import type { Responder } from "./infra/ownership.js";
 import type { WatcherExecutionState, WatcherStatus } from "./domain/watcher.js";
 import type { WatcherStatusColor } from "./domain/status-presentation.js";
+import { observationFooterSuffix } from "./domain/observation.js";
+import type { WatcherCapabilityProfile } from "./domain/capabilities.js";
+import { createObserver, type ObserverPort } from "./application/observer.js";
 import type { createFailureNotifier } from "./domain/failure-notifier.js";
 
 export interface PollingDeps {
   readConfig: (cwd: string) => Promise<FunzzyConfig | null>;
   createFailureNotifier: typeof createFailureNotifier;
-  queryStatus: (socketPath: string) => Promise<WatcherStatus>;
+  loadCapabilities: (socketPath: string) => Promise<WatcherCapabilityProfile>;
+  invalidateCapabilities: () => void;
+  createSubscriptionPort: (socketPath: string) => ObserverPort;
+  createPollingPort: (socketPath: string, pollIntervalMs: number) => ObserverPort;
   readResponder: (socketPath: string) => Promise<Responder | null>;
   recordsAgentActivity: (toolName: string) => boolean;
   recordAutomaticResponder: (socketPath: string, sessionId: string) => Promise<void>;
@@ -35,8 +41,7 @@ export interface PollingLifecycle {
 const STATUS_KEY = "watcher-status";
 
 export function createPollingLifecycle(pi: ExtensionAPI, deps: PollingDeps): PollingLifecycle {
-  let pollTimer: NodeJS.Timeout | undefined;
-  let pollStatus: (() => Promise<void>) | undefined;
+  let observer: ReturnType<typeof createObserver> | undefined;
   let activitySocketPath: string | undefined;
   let notifyFailure: ReturnType<typeof createFailureNotifier> | undefined;
 
@@ -49,9 +54,8 @@ export function createPollingLifecycle(pi: ExtensionAPI, deps: PollingDeps): Pol
   };
 
   const resetSessionState = (): void => {
-    if (pollTimer) clearInterval(pollTimer);
-    pollTimer = undefined;
-    pollStatus = undefined;
+    observer?.dispose();
+    observer = undefined;
     activitySocketPath = undefined;
     notifyFailure = undefined;
   };
@@ -70,31 +74,39 @@ export function createPollingLifecycle(pi: ExtensionAPI, deps: PollingDeps): Pol
       );
     });
 
-    let polling = false;
-    const poll = async () => {
-      if (polling) return;
-      polling = true;
-      try {
-        const status = await deps.queryStatus(config.socketPath);
-        if (pollStatus !== poll) return; // session reset or disconnected mid-flight
-        setWatcherStatus(
-          ctx,
-          deps.renderWatcherFooter(status),
-          deps.watcherStatusColor(status.state),
-        );
-        const responder = await deps.readResponder(config.socketPath);
-        if (pollStatus !== poll) return;
-        notifyFailure?.(status, ctx.isIdle(), responder?.sessionId ?? null);
-      } catch {
-        if (pollStatus === poll) setWatcherStatus(ctx, "watcher: unavailable", "warning");
-      } finally {
-        polling = false;
-      }
-    };
+    // Capability-gated transport (contract §8): subscription when the watcher
+    // supports it, legacy polling otherwise. Polled observations are marked
+    // with the weaker-freshness footer suffix by the sink below.
+    const profile = await deps.loadCapabilities(config.socketPath);
+    const port =
+      profile.features.subscription && profile.features.correlatedSnapshots
+        ? deps.createSubscriptionPort(config.socketPath)
+        : deps.createPollingPort(config.socketPath, config.pollIntervalMs);
 
-    pollStatus = poll;
-    await poll();
-    pollTimer = setInterval(() => void poll(), config.pollIntervalMs);
+    const current = createObserver({
+      port,
+      sink: {
+        onObservation: (observation) => {
+          if (observer !== current) return; // session reset or disconnected mid-flight
+          setWatcherStatus(
+            ctx,
+            deps.renderWatcherFooter(observation.status) +
+              observationFooterSuffix(observation.source),
+            deps.watcherStatusColor(observation.status.state),
+          );
+          void deps.readResponder(config.socketPath).then((responder) => {
+            if (observer !== current) return;
+            notifyFailure?.(observation.status, ctx.isIdle(), responder?.sessionId ?? null);
+          });
+        },
+        onUnavailable: () => {
+          if (observer !== current) return;
+          setWatcherStatus(ctx, "watcher: unavailable", "warning");
+        },
+      },
+    });
+    observer = current;
+    await current.start();
   };
 
   const beginSession = async (ctx: ExtensionContext): Promise<void> => {
@@ -128,7 +140,7 @@ export function createPollingLifecycle(pi: ExtensionAPI, deps: PollingDeps): Pol
     },
 
     async agentSettled() {
-      await pollStatus?.();
+      // Push-driven: observations carry failures; no polling flush is needed.
     },
 
     async sessionShutdown(ctx) {
@@ -139,6 +151,8 @@ export function createPollingLifecycle(pi: ExtensionAPI, deps: PollingDeps): Pol
     async disconnect(ctx) {
       if (activitySocketPath === undefined) return;
       resetSessionState();
+      // The watcher instance may have changed; re-negotiate on next connect.
+      deps.invalidateCapabilities();
       ctx.ui.setStatus(STATUS_KEY, undefined);
     },
 

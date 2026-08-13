@@ -6,6 +6,8 @@ import { createFailureNotifier } from "./domain/failure-notifier.js";
 import { renderWatcherFooter, watcherStatusColor } from "./domain/status-presentation.js";
 import { formatTargets } from "./domain/targets-presentation.js";
 import { formatStatus, listTargets, queryStatus, requestRun } from "./infra/client.js";
+import { CapabilityCache, loadCapabilities } from "./infra/capabilities.js";
+import { createPollingPort, createSubscriptionPort } from "./infra/observer.js";
 import { readConfig } from "./infra/config.js";
 import { worktreeFingerprint } from "./infra/fingerprint.js";
 import {
@@ -22,11 +24,16 @@ import { createRequireTrustedConfig } from "./trusted-config.js";
 
 export default function funzzyStatus(pi: ExtensionAPI) {
   const requireTrustedConfig = createRequireTrustedConfig(readConfig);
+  const capabilityCache = new CapabilityCache();
 
   const lifecycle = createPollingLifecycle(pi, {
     readConfig,
     createFailureNotifier,
-    queryStatus,
+    loadCapabilities: (socketPath) => loadCapabilities(socketPath, capabilityCache),
+    invalidateCapabilities: () => capabilityCache.invalidate(),
+    createSubscriptionPort,
+    createPollingPort: (socketPath, pollIntervalMs) =>
+      createPollingPort(queryStatus, socketPath, pollIntervalMs),
     readResponder,
     recordsAgentActivity,
     recordAutomaticResponder,

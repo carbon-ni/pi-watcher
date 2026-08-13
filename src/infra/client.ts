@@ -7,6 +7,10 @@ import { createConnection } from "node:net";
 // closed with an actionable error instead of a generic cast. Change the Rust
 // serializer and this decoder together.
 import {
+  decodeWatcherCapabilities,
+  type WatcherCapabilityProfile,
+} from "../domain/capabilities.js";
+import {
   decodeWatcherRun,
   decodeWatcherStatus,
   decodeWatcherTargets,
@@ -32,6 +36,35 @@ interface ControlResponse {
   id: string | number | null;
   result?: unknown;
   error?: RpcError;
+}
+
+/**
+ * JSON-RPC error returned by the Funzzy server, carrying its numeric code so
+ * clients can react to specific protocol signals (e.g. -32601 Method not
+ * found during capability negotiation) without parsing messages.
+ */
+export class FunzzyRpcError extends Error {
+  constructor(
+    readonly code: number,
+    message: string,
+    readonly data?: unknown,
+  ) {
+    super(message);
+    this.name = "FunzzyRpcError";
+  }
+}
+
+export function queryCapabilities(
+  socketPath: string,
+  timeoutMs = 1_000,
+): Promise<WatcherCapabilityProfile> {
+  return sendRequest(
+    socketPath,
+    { jsonrpc: "2.0", id: "capabilities", method: "capabilities" },
+    timeoutMs,
+    true,
+    decodeWatcherCapabilities,
+  );
 }
 
 export function queryStatus(socketPath: string, timeoutMs = 1_000): Promise<FunzzyStatus> {
@@ -157,7 +190,7 @@ function sendRequestOnce<T>(
         if (parsed.jsonrpc !== "2.0") {
           throw new Error(`Unsupported Funzzy JSON-RPC version: ${parsed.jsonrpc}`);
         }
-        if (parsed.error) throw new Error(formatRpcError(parsed.error));
+        if (parsed.error) throw new FunzzyRpcError(parsed.error.code, formatRpcError(parsed.error));
         if (parsed.result === undefined) throw new Error("Funzzy response has no result");
         const decoded = decode(parsed.result);
         settled = true;

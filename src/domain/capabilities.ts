@@ -1,0 +1,359 @@
+import {
+  describeValue,
+  expectObject,
+  readExecutionState,
+  readNullableNumber,
+  readRequiredNumber,
+  readRequiredString,
+  readStringArray,
+  WatcherProtocolError,
+  type EXECUTION_STATES,
+} from "./protocol.js";
+
+export { WatcherProtocolError } from "./protocol.js";
+export type { WatcherExecutionState } from "./watcher.js";
+
+/**
+ * Correlated snapshot vocabulary (contract §1, §3):
+ * an instance is one Funzzy process, a batch groups the tasks scheduled for
+ * one trigger, and freshness tier labels how close a snapshot is to the
+ * latest relevant truth. Decoders here are pure domain: no transport, no Pi.
+ *
+ * Compatibility path: servers without these additive payloads keep decoding
+ * through `watcher.ts` (`status`, `targets`, `run`); negotiation maps them to
+ * `LEGACY_CAPABILITY_PROFILE` instead of inventing correlation fields.
+ */
+
+export type WatcherFreshness = "current" | "stale" | "unknown";
+
+export interface WatcherInstance {
+  /** Opaque identity of one Funzzy watcher process; changes on restart. */
+  token: string;
+  /** Process start time when the server reports it, otherwise null. */
+  startedAtEpochMs: number | null;
+}
+
+export interface WatcherLimits {
+  /** Retained task output the server keeps before eviction. 0 = none. */
+  outputRetentionBytes: number;
+  /** Largest accepted control response. */
+  maxResponseBytes: number;
+  /** Default failure-evidence tail the server emits. */
+  maxEvidenceLines: number;
+}
+
+export interface WatcherFeatures {
+  atomicAwait: boolean;
+  subscription: boolean;
+  correlatedSnapshots: boolean;
+  outputRetrieval: boolean;
+  pendingWork: boolean;
+}
+
+export type WatcherCapabilitySource = "negotiated" | "legacy";
+
+export interface WatcherCapabilityProfile {
+  /** "legacy" labels weaker guarantees; never assume equivalence (contract §8). */
+  source: WatcherCapabilitySource;
+  protocolVersion: string;
+  schemaVersion: number;
+  instance: WatcherInstance;
+  methods: string[];
+  optionalFields: string[];
+  limits: WatcherLimits;
+  features: WatcherFeatures;
+}
+
+export const WATCHER_FRESHNESS_VALUES = ["current", "stale", "unknown"] as const;
+export const WATCHER_TASK_STATES = ["passed", "failed", "cancelled"] as const;
+
+export type WatcherTaskState = (typeof WATCHER_TASK_STATES)[number];
+
+export interface WatcherTaskOutcome {
+  id: string;
+  name: string;
+  state: WatcherTaskState;
+  durationMs: number | null;
+}
+
+/**
+ * A status snapshot correlated to instance, batch, and task identities.
+ * Superset of the compatibility `WatcherStatus` (contract §2).
+ */
+export interface WatcherCorrelatedSnapshot {
+  instance: WatcherInstance;
+  generation: number;
+  batchId: string;
+  state: (typeof EXECUTION_STATES)[number];
+  trigger: string | null;
+  tasks: WatcherTaskOutcome[];
+  pending: number;
+  freshness: WatcherFreshness;
+  durationMs: number | null;
+  failures: string[];
+}
+
+/**
+ * Explicit legacy profile for servers without a `capabilities` method
+ * (contract §8): supported compatibility methods only, no features, no
+ * instance identity. Produced by negotiation, never probed field by field.
+ */
+export const LEGACY_CAPABILITY_PROFILE: WatcherCapabilityProfile = {
+  source: "legacy",
+  protocolVersion: "1.0",
+  schemaVersion: 1,
+  instance: { token: "", startedAtEpochMs: null },
+  limits: { outputRetentionBytes: 0, maxResponseBytes: 65_536, maxEvidenceLines: 40 },
+  methods: ["status", "targets", "run"],
+  optionalFields: [],
+  features: {
+    atomicAwait: false,
+    subscription: false,
+    correlatedSnapshots: false,
+    outputRetrieval: false,
+    pendingWork: false,
+  },
+};
+
+/**
+ * Decode a `capabilities` method result from `unknown`.
+ *
+ * Wire shape is the agreed additive contract
+ * (`src/domain/fixtures/capabilities.json`, mirrored by Rust protocol tests):
+ * protocol/schema versions, one instance identity, supported methods,
+ * optional correlation fields, output limits, and feature flags.
+ */
+export function decodeWatcherCapabilities(value: unknown): WatcherCapabilityProfile {
+  const object = expectObject(value, "capabilities response");
+
+  const protocolVersion = readRequiredString(object, "protocolVersion", "capabilities response");
+  const schemaVersion = readRequiredNumber(object, "schemaVersion", "capabilities response");
+  const instance = readWatcherInstance(object, "capabilities response");
+  const methods = readStringArray(object, "methods", "capabilities response");
+  const optionalFields = readOptionalStringArray(object, "optionalFields", "capabilities response");
+  const limits = readWatcherLimits(object);
+  const features = readWatcherFeatures(object);
+
+  return {
+    source: "negotiated",
+    protocolVersion,
+    schemaVersion,
+    instance,
+    methods,
+    optionalFields,
+    limits,
+    features,
+  };
+}
+
+/**
+ * Decode a correlated snapshot result from `unknown`.
+ *
+ * Wire shape is the agreed additive contract
+ * (`src/domain/fixtures/correlated-snapshot.json`): instance + batch identity,
+ * generation, terminal or transitional state, per-task outcomes, pending work,
+ * and the freshness tier.
+ */
+export function decodeWatcherCorrelatedSnapshot(value: unknown): WatcherCorrelatedSnapshot {
+  const object = expectObject(value, "correlated snapshot");
+
+  const instance = readWatcherInstance(object, "correlated snapshot");
+  const generation = readRequiredNumber(object, "generation", "correlated snapshot");
+  const batchId = readRequiredString(object, "batchId", "correlated snapshot");
+  const state = readExecutionState(object, "correlated snapshot");
+  const trigger = readOptionalNullableString(object, "trigger");
+  const tasks = readTaskOutcomes(object);
+  const pending = readRequiredNumber(object, "pending", "correlated snapshot");
+  const freshness = readFreshness(object);
+  const durationMs = readOptionalNullableNumber(object, "durationMs");
+  const failures = readOptionalStringArray(object, "failures", "correlated snapshot");
+
+  return {
+    instance,
+    generation,
+    batchId,
+    state,
+    trigger,
+    tasks,
+    pending,
+    freshness,
+    durationMs,
+    failures,
+  };
+}
+
+/** Policy entry point: whether a negotiated profile supports a method. */
+export function hasMethod(profile: WatcherCapabilityProfile, method: string): boolean {
+  return profile.methods.includes(method);
+}
+
+function readWatcherInstance(object: Record<string, unknown>, what: string): WatcherInstance {
+  const raw = object["instance"];
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+    throw new WatcherProtocolError(
+      `Funzzy ${what}: "instance" must be an object, got ${describeValue(raw)}`,
+    );
+  }
+  const instance = raw as Record<string, unknown>;
+  const token = readRequiredString(instance, "token", what);
+  let startedAtEpochMs: number | null = null;
+  if ("startedAtEpochMs" in instance) {
+    const value = instance["startedAtEpochMs"];
+    if (value !== null && (typeof value !== "number" || Number.isNaN(value))) {
+      throw new WatcherProtocolError(
+        `Funzzy ${what}: "startedAtEpochMs" must be a number or null, got ${describeValue(value)}`,
+      );
+    }
+    startedAtEpochMs = value;
+  }
+  return { token, startedAtEpochMs };
+}
+
+function readOptionalStringArray(
+  object: Record<string, unknown>,
+  field: string,
+  what: string,
+): string[] {
+  if (!(field in object)) return [];
+  const value = object[field];
+  if (!Array.isArray(value)) {
+    throw new WatcherProtocolError(
+      `Funzzy ${what}: "${field}" must be an array of strings, got ${describeValue(value)}`,
+    );
+  }
+  const strings: string[] = [];
+  for (const entry of value) {
+    if (typeof entry !== "string") {
+      throw new WatcherProtocolError(
+        `Funzzy ${what}: "${field}" must be an array of strings, got ${describeValue(value)}`,
+      );
+    }
+    strings.push(entry);
+  }
+  return strings;
+}
+
+function readWatcherLimits(object: Record<string, unknown>): WatcherLimits {
+  if (!("limits" in object)) {
+    return {
+      outputRetentionBytes: 0,
+      maxResponseBytes: LEGACY_CAPABILITY_PROFILE.limits.maxResponseBytes,
+      maxEvidenceLines: LEGACY_CAPABILITY_PROFILE.limits.maxEvidenceLines,
+    };
+  }
+  const raw = object["limits"];
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+    throw new WatcherProtocolError(
+      `Funzzy capabilities response: "limits" must be an object, got ${describeValue(raw)}`,
+    );
+  }
+  const limits = raw as Record<string, unknown>;
+  return {
+    outputRetentionBytes: readRequiredNumber(
+      limits,
+      "outputRetentionBytes",
+      "capabilities response",
+    ),
+    maxResponseBytes: readRequiredNumber(limits, "maxResponseBytes", "capabilities response"),
+    maxEvidenceLines: readRequiredNumber(limits, "maxEvidenceLines", "capabilities response"),
+  };
+}
+
+function readWatcherFeatures(object: Record<string, unknown>): WatcherFeatures {
+  if (!("features" in object)) {
+    return { ...LEGACY_CAPABILITY_PROFILE.features };
+  }
+  const raw = object["features"];
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+    throw new WatcherProtocolError(
+      `Funzzy capabilities response: "features" must be an object, got ${describeValue(raw)}`,
+    );
+  }
+  const features = raw as Record<string, unknown>;
+  return {
+    atomicAwait: readFeatureFlag(features, "features.atomicAwait"),
+    subscription: readFeatureFlag(features, "features.subscription"),
+    correlatedSnapshots: readFeatureFlag(features, "features.correlatedSnapshots"),
+    outputRetrieval: readFeatureFlag(features, "features.outputRetrieval"),
+    pendingWork: readFeatureFlag(features, "features.pendingWork"),
+  };
+}
+
+function readFeatureFlag(object: Record<string, unknown>, field: string): boolean {
+  const key = field.split(".").at(-1) ?? field;
+  if (!(key in object)) {
+    throw new WatcherProtocolError(`Funzzy capabilities response: "${field}" is required`);
+  }
+  const value = object[key];
+  if (typeof value !== "boolean") {
+    throw new WatcherProtocolError(
+      `Funzzy capabilities response: "${field}" must be a boolean, got ${describeValue(value)}`,
+    );
+  }
+  return value;
+}
+
+function readOptionalNullableString(object: Record<string, unknown>, field: string): string | null {
+  if (!(field in object)) return null;
+  const value = object[field];
+  if (value === null) return null;
+  if (typeof value !== "string") {
+    throw new WatcherProtocolError(
+      `Funzzy correlated snapshot: "${field}" must be a string or null, got ${describeValue(value)}`,
+    );
+  }
+  return value;
+}
+
+function readOptionalNullableNumber(object: Record<string, unknown>, field: string): number | null {
+  if (!(field in object)) return null;
+  const value = object[field];
+  if (value === null) return null;
+  if (typeof value !== "number" || Number.isNaN(value)) {
+    throw new WatcherProtocolError(
+      `Funzzy correlated snapshot: "${field}" must be a number or null, got ${describeValue(value)}`,
+    );
+  }
+  return value;
+}
+
+function readTaskOutcomes(object: Record<string, unknown>): WatcherTaskOutcome[] {
+  const field = "tasks";
+  if (!(field in object)) {
+    throw new WatcherProtocolError(`Funzzy correlated snapshot: "${field}" is required`);
+  }
+  const value = object[field];
+  if (!Array.isArray(value)) {
+    throw new WatcherProtocolError(
+      `Funzzy correlated snapshot: "${field}" must be an array of objects, got ${describeValue(value)}`,
+    );
+  }
+  return value.map((entry, index) => {
+    const task = expectObject(entry, `task at index ${index}`);
+    const id = readRequiredString(task, "id", `task at index ${index}`);
+    const name = readRequiredString(task, "name", `task at index ${index}`);
+    const state = readTaskState(task, index);
+    const durationMs = readNullableNumber(task, "durationMs", `task at index ${index}`);
+    return { id, name, state, durationMs };
+  });
+}
+
+function readTaskState(object: Record<string, unknown>, index: number): WatcherTaskState {
+  const value = object["state"];
+  if (typeof value === "string" && WATCHER_TASK_STATES.includes(value as WatcherTaskState)) {
+    return value as WatcherTaskState;
+  }
+  throw new WatcherProtocolError(
+    `Funzzy task at index ${index}: "state" must be one of ${WATCHER_TASK_STATES.join(", ")}, got ${describeValue(value)}`,
+  );
+}
+
+function readFreshness(object: Record<string, unknown>): WatcherFreshness {
+  const value = object["freshness"];
+  if (typeof value === "string" && WATCHER_FRESHNESS_VALUES.includes(value as WatcherFreshness)) {
+    return value as WatcherFreshness;
+  }
+  throw new WatcherProtocolError(
+    `Funzzy correlated snapshot: "freshness" must be one of ${WATCHER_FRESHNESS_VALUES.join(", ")}, got ${describeValue(value)}`,
+  );
+}

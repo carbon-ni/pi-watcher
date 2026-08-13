@@ -1,7 +1,7 @@
 ---
 id: TASK-0003
 title: Replace status polling with push-driven lifecycle observation
-status: todo
+status: done
 depends_on: [TASK-0002]
 priority: high
 tags: [typescript, application, infra, lifecycle, subscription, tdd]

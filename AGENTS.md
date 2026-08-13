@@ -7,16 +7,16 @@ Pi extension that exposes Funzzy watcher state through `watcher_*` tools, `/watc
 Dependencies point inward:
 
 ```text
-src/index.ts -> application -> domain
-             -> infra ------> domain
+src/ -> application -> domain
+     -> infra ------> domain
 ```
 
-- `src/index.ts` is composition root and only Pi-facing production module.
+- `src/` is the only Pi-facing layer; `src/index.ts` is the extension entry and composition root that wires factories with concrete dependencies.
 - `src/domain/` owns watcher vocabulary and deterministic policy.
 - `src/application/` owns use-case orchestration through injected callbacks.
 - `src/infra/` owns filesystem, Git, YAML, and Unix-socket I/O.
 
-Read nearest nested `AGENTS.md` before changing a layer. Do not add reverse dependencies or import Pi outside composition root.
+Read nearest nested `AGENTS.md` before changing a layer. Do not add reverse dependencies or import Pi outside `src/`.
 
 ## Public compatibility surfaces
 

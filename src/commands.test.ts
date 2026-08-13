@@ -2,36 +2,63 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import funzzyStatus from "./index.js";
 
-const { queryStatus, status } = vi.hoisted(() => ({
-  queryStatus: vi.fn(),
-  status: {
+const {
+  queryStatus,
+  status,
+  formatStatus,
+  listTargets,
+  requestRun,
+  readResponder,
+  setPinnedResponder,
+  clearPinnedResponder,
+  recordAutomaticResponder,
+} = vi.hoisted(() => {
+  const status = {
     generation: 7,
     state: "passed" as const,
     trigger: "src/index.ts",
     commands: ["make all"],
     durationMs: 42,
-    failures: [],
-  },
-}));
+    failures: [] as string[],
+  };
+  return {
+    queryStatus: vi.fn(),
+    status,
+    formatStatus: vi.fn(),
+    listTargets: vi.fn(),
+    requestRun: vi.fn(),
+    readResponder: vi.fn(),
+    setPinnedResponder: vi.fn(),
+    clearPinnedResponder: vi.fn(),
+    recordAutomaticResponder: vi.fn(),
+  };
+});
 
 vi.mock("./infra/config.js", () => ({
   readConfig: vi.fn().mockResolvedValue({ socketPath: "/tmp/funzzy.sock", pollIntervalMs: 1_000 }),
 }));
 vi.mock("./infra/client.js", () => ({
-  formatStatus: vi.fn(),
-  listTargets: vi.fn(),
+  formatStatus,
+  listTargets,
   queryStatus,
-  requestRun: vi.fn(),
+  requestRun,
 }));
 vi.mock("./infra/ownership.js", () => ({
-  clearPinnedResponder: vi.fn(),
-  readResponder: vi.fn().mockResolvedValue(null),
-  recordAutomaticResponder: vi.fn(),
-  setPinnedResponder: vi.fn(),
+  clearPinnedResponder,
+  readResponder,
+  recordAutomaticResponder,
+  setPinnedResponder,
 }));
 
 beforeEach(() => {
-  queryStatus.mockResolvedValue(status);
+  queryStatus.mockReset().mockResolvedValue(status);
+  formatStatus.mockReset().mockReturnValue("PASS gen=7");
+  listTargets.mockReset().mockResolvedValue([{ name: "lint", commands: ["npm run lint"] }]);
+  requestRun.mockReset().mockResolvedValue(10);
+  readResponder.mockReset().mockResolvedValue(null);
+  setPinnedResponder.mockReset().mockResolvedValue(undefined);
+  clearPinnedResponder.mockReset().mockResolvedValue(undefined);
+  recordAutomaticResponder.mockReset().mockResolvedValue(undefined);
 });
 
 afterEach(() => {
@@ -65,6 +92,37 @@ function createStatusHarness() {
 
   funzzyStatus(pi as never);
   return { ctx, handlers, setStatus };
+}
+
+function createCommandHarness() {
+  const handlers = new Map<string, (args: string, ctx: never) => Promise<void>>();
+  const completions = new Map<string, (prefix: string) => unknown>();
+  const notify = vi.fn();
+  const pi = {
+    on: vi.fn(),
+    registerTool: vi.fn(),
+    registerCommand: vi.fn(
+      (
+        name: string,
+        options: {
+          handler: (args: string, ctx: never) => Promise<void>;
+          getArgumentCompletions?: (prefix: string) => unknown;
+        },
+      ) => {
+        handlers.set(name, options.handler);
+        if (options.getArgumentCompletions) completions.set(name, options.getArgumentCompletions);
+      },
+    ),
+  };
+  const ctx = {
+    cwd: "/project",
+    isProjectTrusted: () => true,
+    ui: { notify },
+    sessionManager: { getSessionId: () => "session-1" },
+  };
+
+  funzzyStatus(pi as never);
+  return { ctx, handlers, notify, completions };
 }
 
 describe("funzzyStatus registration", () => {
@@ -130,5 +188,120 @@ describe("funzzyStatus registration", () => {
     await handlers.get("session_start")?.({} as never, ctx as never);
 
     expect(setStatus).toHaveBeenCalledWith("watcher-status", "warning:watcher: unavailable");
+  });
+});
+
+describe("watcher-status command", () => {
+  it("notifies the formatted status", async () => {
+    const { ctx, handlers, notify } = createCommandHarness();
+
+    await handlers.get("watcher-status")?.("", ctx as never);
+
+    expect(notify).toHaveBeenCalledWith("PASS gen=7", "info");
+  });
+
+  it("warns when the project is untrusted", async () => {
+    const { ctx, handlers, notify } = createCommandHarness();
+    ctx.isProjectTrusted = () => false;
+
+    await handlers.get("watcher-status")?.("", ctx as never);
+
+    expect(notify).toHaveBeenCalledWith("Funzzy project configuration is not trusted", "warning");
+  });
+
+  it("notifies real errors instead of hiding them", async () => {
+    const { ctx, handlers, notify } = createCommandHarness();
+    queryStatus.mockRejectedValueOnce(new Error("socket down"));
+
+    await handlers.get("watcher-status")?.("", ctx as never);
+
+    expect(notify).toHaveBeenCalledWith("socket down", "error");
+  });
+});
+
+describe("watcher-targets command", () => {
+  it("notifies formatted targets", async () => {
+    const { ctx, handlers, notify } = createCommandHarness();
+
+    await handlers.get("watcher-targets")?.("", ctx as never);
+
+    expect(notify).toHaveBeenCalledWith("- lint: npm run lint", "info");
+  });
+
+  it("notifies errors from the control socket", async () => {
+    const { ctx, handlers, notify } = createCommandHarness();
+    listTargets.mockRejectedValueOnce(new Error("socket down"));
+
+    await handlers.get("watcher-targets")?.("", ctx as never);
+
+    expect(notify).toHaveBeenCalledWith("socket down", "error");
+  });
+});
+
+describe("watcher-responder command", () => {
+  it("pins the responder to the current session on claim", async () => {
+    const { ctx, handlers, notify } = createCommandHarness();
+
+    await handlers.get("watcher-responder")?.("claim", ctx as never);
+
+    expect(setPinnedResponder).toHaveBeenCalledWith("/tmp/funzzy.sock", "session-1");
+    expect(notify).toHaveBeenCalledWith(
+      "Funzzy responder pinned to this Pi session (session-1)",
+      "info",
+    );
+  });
+
+  it("returns the responder to automatic tracking on auto", async () => {
+    const { ctx, handlers, notify } = createCommandHarness();
+
+    await handlers.get("watcher-responder")?.("auto", ctx as never);
+
+    expect(clearPinnedResponder).toHaveBeenCalledWith("/tmp/funzzy.sock");
+    expect(recordAutomaticResponder).toHaveBeenCalledWith("/tmp/funzzy.sock", "session-1");
+    expect(notify).toHaveBeenCalledWith(
+      "Funzzy responder returned to automatic activity tracking",
+      "info",
+    );
+  });
+
+  it("reports the current responder on status", async () => {
+    const { ctx, handlers, notify } = createCommandHarness();
+
+    await handlers.get("watcher-responder")?.("", ctx as never);
+    expect(notify).toHaveBeenCalledWith("Funzzy responder: none", "info");
+
+    readResponder.mockResolvedValue({ mode: "automatic", sessionId: "session-1" });
+    await handlers.get("watcher-responder")?.("status", ctx as never);
+    expect(notify).toHaveBeenLastCalledWith("Funzzy responder: automatic session-1", "info");
+  });
+
+  it("warns on an unknown action", async () => {
+    const { ctx, handlers, notify } = createCommandHarness();
+
+    await handlers.get("watcher-responder")?.("explode", ctx as never);
+
+    expect(notify).toHaveBeenCalledWith("Usage: /watcher-responder [status|claim|auto]", "warning");
+  });
+
+  it("notifies errors from responder operations", async () => {
+    const { ctx, handlers, notify } = createCommandHarness();
+    setPinnedResponder.mockRejectedValueOnce(new Error("permission denied"));
+
+    await handlers.get("watcher-responder")?.("claim", ctx as never);
+
+    expect(notify).toHaveBeenCalledWith("permission denied", "error");
+  });
+
+  it("offers responder actions as argument completions", () => {
+    const { completions } = createCommandHarness();
+    const complete = completions.get("watcher-responder")!;
+
+    expect(complete("")).toEqual([
+      { value: "status", label: "status" },
+      { value: "claim", label: "claim" },
+      { value: "auto", label: "auto" },
+    ]);
+    expect(complete("c")).toEqual([{ value: "claim", label: "claim" }]);
+    expect(complete("x")).toBeNull();
   });
 });

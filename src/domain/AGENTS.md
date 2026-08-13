@@ -8,6 +8,7 @@ Owns watcher vocabulary and deterministic decisions.
 - `activity.ts`: decides which Pi tool calls represent worktree activity.
 - `failure-notifier.ts`: decides whether one failed generation should be delivered.
 - `status-presentation.ts`: renders and colors compact user-facing watcher status.
+- `targets-presentation.ts`: renders the compact user-facing target list.
 
 ## Boundaries
 

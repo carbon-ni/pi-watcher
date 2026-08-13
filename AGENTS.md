@@ -21,7 +21,7 @@ Read nearest nested `AGENTS.md` before changing a layer. Do not add reverse depe
 ## Public compatibility surfaces
 
 - Tools: `watcher_status`, `watcher_targets`, `watcher_verify`.
-- Commands: `/watcher-status`, `/watcher-targets`, `/watcher-responder`.
+- Commands: `/watcher-status`, `/watcher-targets`, `/watcher-responder`, `/watcher-disconnect`, `/watcher-connect`.
 - Status bar entry uses `watcher:` terminology and state-aware theme colors.
 - Project contract is `.watch.yaml`/`.watch.yml` `on.socket`.
 

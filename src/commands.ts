@@ -13,6 +13,10 @@ export interface CommandDeps {
   setPinnedResponder: (socketPath: string, sessionId: string) => Promise<void>;
   clearPinnedResponder: (socketPath: string) => Promise<void>;
   recordAutomaticResponder: (socketPath: string, sessionId: string) => Promise<void>;
+  disconnectSession: (socketPath: string, sessionId: string) => Promise<void>;
+  connectSession: (socketPath: string, sessionId: string) => Promise<void>;
+  disconnectWatcher: (ctx: ExtensionCommandContext) => Promise<void>;
+  connectWatcher: (ctx: ExtensionCommandContext) => Promise<void>;
 }
 
 export function registerCommands(pi: ExtensionAPI, deps: CommandDeps): void {
@@ -74,6 +78,43 @@ export function registerCommands(pi: ExtensionAPI, deps: CommandDeps): void {
       try {
         const config = await deps.requireTrustedConfig(ctx);
         ctx.ui.notify(deps.formatStatus(await deps.queryStatus(config.socketPath)), "info");
+      } catch (error) {
+        notifyCommandError(ctx, error);
+      }
+    },
+  });
+
+  pi.registerCommand("watcher-disconnect", {
+    description:
+      "Disconnect this Pi session from the Funzzy watcher so it stops receiving watcher messages",
+    handler: async (_args, ctx) => {
+      try {
+        const config = await deps.requireTrustedConfig(ctx);
+        const sessionId = ctx.sessionManager.getSessionId();
+
+        await deps.disconnectSession(config.socketPath, sessionId);
+        const responder = await deps.readResponder(config.socketPath);
+        if (responder?.mode === "pinned" && responder.sessionId === sessionId) {
+          await deps.clearPinnedResponder(config.socketPath);
+        }
+        await deps.disconnectWatcher(ctx);
+        ctx.ui.notify("Watcher disconnected for this session", "info");
+      } catch (error) {
+        notifyCommandError(ctx, error);
+      }
+    },
+  });
+
+  pi.registerCommand("watcher-connect", {
+    description: "Reconnect this Pi session to the Funzzy watcher",
+    handler: async (_args, ctx) => {
+      try {
+        const config = await deps.requireTrustedConfig(ctx);
+        const sessionId = ctx.sessionManager.getSessionId();
+
+        await deps.connectSession(config.socketPath, sessionId);
+        await deps.connectWatcher(ctx);
+        ctx.ui.notify("Watcher reconnected for this session", "info");
       } catch (error) {
         notifyCommandError(ctx, error);
       }

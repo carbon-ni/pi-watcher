@@ -26,6 +26,7 @@ function createDeps(overrides: Record<string, unknown> = {}) {
     readResponder: vi.fn().mockResolvedValue(null),
     recordsAgentActivity,
     recordAutomaticResponder: vi.fn().mockResolvedValue(undefined),
+    isSessionDisconnected: vi.fn().mockResolvedValue(false),
     renderWatcherFooter,
     watcherStatusColor,
     formatStatus,
@@ -193,6 +194,103 @@ describe("activity attribution", () => {
     await expect(
       lifecycle.toolCall({ toolName: "bash" } as never, ctx as never),
     ).resolves.toBeUndefined();
+  });
+});
+
+describe("session disconnect", () => {
+  it("does not poll when the session is disconnected", async () => {
+    const { ctx, deps, lifecycle, setStatus } = createHarness({
+      isSessionDisconnected: vi.fn().mockResolvedValue(true),
+    });
+
+    await lifecycle.sessionStart({} as never, ctx as never);
+
+    expect(deps.queryStatus).not.toHaveBeenCalled();
+    expect(setStatus).toHaveBeenCalledWith("watcher-status", "muted:watcher: disconnected");
+  });
+
+  it("stops polling and clears the status bar on disconnect", async () => {
+    vi.useFakeTimers();
+    const { ctx, deps, lifecycle, setStatus } = createHarness();
+
+    await lifecycle.sessionStart({} as never, ctx as never);
+    await lifecycle.disconnect(ctx as never);
+    const callsAtDisconnect = deps.queryStatus.mock.calls.length;
+
+    expect(setStatus).toHaveBeenLastCalledWith("watcher-status", undefined);
+
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(deps.queryStatus.mock.calls.length).toBe(callsAtDisconnect);
+  });
+
+  it("disconnect is a no-op when nothing is running", async () => {
+    const { ctx, deps, lifecycle } = createHarness();
+
+    await expect(lifecycle.disconnect(ctx as never)).resolves.toBeUndefined();
+    expect(deps.queryStatus).not.toHaveBeenCalled();
+  });
+
+  it("stops activity attribution after disconnect", async () => {
+    const { ctx, deps, lifecycle } = createHarness();
+    await lifecycle.sessionStart({} as never, ctx as never);
+
+    await lifecycle.disconnect(ctx as never);
+    await lifecycle.toolCall({ toolName: "edit" } as never, ctx as never);
+
+    expect(deps.recordAutomaticResponder).not.toHaveBeenCalled();
+  });
+
+  it("does not attribute activity when started disconnected", async () => {
+    const { ctx, deps, lifecycle } = createHarness({
+      isSessionDisconnected: vi.fn().mockResolvedValue(true),
+    });
+    await lifecycle.sessionStart({} as never, ctx as never);
+
+    await lifecycle.toolCall({ toolName: "edit" } as never, ctx as never);
+
+    expect(deps.recordAutomaticResponder).not.toHaveBeenCalled();
+  });
+
+  it("connect resumes polling after disconnect", async () => {
+    vi.useFakeTimers();
+    const { ctx, deps, lifecycle } = createHarness();
+
+    await lifecycle.sessionStart({} as never, ctx as never);
+    await lifecycle.disconnect(ctx as never);
+    await lifecycle.connect(ctx as never);
+    const callsAfterConnect = deps.queryStatus.mock.calls.length;
+
+    await vi.advanceTimersByTimeAsync(CONFIG.pollIntervalMs);
+    expect(deps.queryStatus.mock.calls.length).toBe(callsAfterConnect + 1);
+  });
+
+  it("connect resumes a session that started disconnected", async () => {
+    const { ctx, deps, lifecycle, setStatus } = createHarness({
+      isSessionDisconnected: vi.fn().mockResolvedValueOnce(true).mockResolvedValue(false),
+    });
+
+    await lifecycle.sessionStart({} as never, ctx as never);
+    expect(deps.queryStatus).not.toHaveBeenCalled();
+
+    await lifecycle.connect(ctx as never);
+
+    expect(deps.queryStatus).toHaveBeenCalledWith(CONFIG.socketPath);
+    expect(setStatus).toHaveBeenLastCalledWith("watcher-status", "success:watcher: passed #7 42ms");
+  });
+
+  it("does not deliver new failures after disconnect", async () => {
+    const failed: WatcherStatus = { ...STATUS, state: "failed", failures: ["boom"] };
+    const { ctx, lifecycle, sendMessage } = createHarness({
+      queryStatus: vi.fn().mockResolvedValue(failed),
+      readResponder: vi.fn().mockResolvedValue({ mode: "automatic", sessionId: "session-1" }),
+    });
+
+    await lifecycle.sessionStart({} as never, ctx as never);
+    const callsAtDisconnect = sendMessage.mock.calls.length;
+    await lifecycle.disconnect(ctx as never);
+    await lifecycle.agentSettled();
+
+    expect(sendMessage.mock.calls.length).toBe(callsAtDisconnect);
   });
 });
 

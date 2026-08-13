@@ -8,6 +8,7 @@ Owns concrete external adapters used by composition root and application behavio
 - `config.ts`: reads `.watch.yaml`/`.watch.yml` and resolves `on.socket` from project root.
 - `fingerprint.ts`: combines tracked Git patch and sorted untracked contents into worktree identity.
 - `ownership.ts`: atomically persists automatic and pinned responder state beside socket.
+- `membership.ts`: atomically persists per-session disconnect state beside socket.
 
 ## Boundaries
 

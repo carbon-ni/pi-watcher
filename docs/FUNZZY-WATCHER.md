@@ -30,12 +30,15 @@ The extension adds:
 - `watcher_targets` agent tool for discovering target names and commands
 - `watcher_verify` final-gate tool (defaults to target `@agent-final`)
 - `/watcher-status`, `/watcher-targets`, and `/watcher-responder` commands
+- `/watcher-disconnect` and `/watcher-connect` commands to opt a Pi session in/out of watcher delivery
 - compact, colored watcher status right-aligned below editor
 - automatic failed-run context delivery when the agent is idle
 
 The extension records the latest Pi session before `bash`, `edit`, and `write` calls in atomic state files beside the control socket. Each failed generation is sent once only to that responder and triggers a follow-up turn; failures detected while responder is busy are held until `agent_settled`. Funzzy remains unaware of Pi sessions.
 
 Use `/watcher-responder claim` to pin failure handling to current Pi session. Pinned responder overrides automatic activity tracking until `/watcher-responder auto` restores it. `/watcher-responder status` shows current mode and session.
+
+Run `/watcher-disconnect` to opt the current Pi session out of the watcher: polling, the status bar entry, and activity attribution stop, so the session never becomes the responder and receives no watcher messages. If that session holds the pinned responder, the pin is released so other sessions can take over. The choice is persisted per project beside the socket and survives session restarts; `/watcher-connect` re-joins the session to the watcher.
 
 `watcher_status` accepts `wait`, `timeoutSeconds`, and `updateIntervalSeconds` (default: 5). Waiting keeps the tool call pending without blocking Pi's Node event loop; intermediate updates stay in the tool UI.
 

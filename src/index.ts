@@ -14,6 +14,7 @@ import {
   recordAutomaticResponder,
   setPinnedResponder,
 } from "./infra/ownership.js";
+import { connectSession, disconnectSession, isSessionDisconnected } from "./infra/membership.js";
 import { createPollingLifecycle } from "./polling.js";
 import { registerTools } from "./tools.js";
 import { registerCommands } from "./commands.js";
@@ -29,6 +30,7 @@ export default function funzzyStatus(pi: ExtensionAPI) {
     readResponder,
     recordsAgentActivity,
     recordAutomaticResponder,
+    isSessionDisconnected,
     renderWatcherFooter,
     watcherStatusColor,
     formatStatus,
@@ -61,5 +63,9 @@ export default function funzzyStatus(pi: ExtensionAPI) {
     setPinnedResponder,
     clearPinnedResponder,
     recordAutomaticResponder,
+    disconnectSession,
+    connectSession,
+    disconnectWatcher: (ctx) => lifecycle.disconnect(ctx),
+    connectWatcher: (ctx) => lifecycle.connect(ctx),
   });
 }

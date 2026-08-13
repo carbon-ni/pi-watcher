@@ -12,6 +12,8 @@ const {
   setPinnedResponder,
   clearPinnedResponder,
   recordAutomaticResponder,
+  disconnectSession,
+  connectSession,
 } = vi.hoisted(() => {
   const status = {
     generation: 7,
@@ -31,6 +33,8 @@ const {
     setPinnedResponder: vi.fn(),
     clearPinnedResponder: vi.fn(),
     recordAutomaticResponder: vi.fn(),
+    disconnectSession: vi.fn(),
+    connectSession: vi.fn(),
   };
 });
 
@@ -49,6 +53,11 @@ vi.mock("./infra/ownership.js", () => ({
   recordAutomaticResponder,
   setPinnedResponder,
 }));
+vi.mock("./infra/membership.js", () => ({
+  connectSession,
+  disconnectSession,
+  isSessionDisconnected: vi.fn().mockResolvedValue(false),
+}));
 
 beforeEach(() => {
   queryStatus.mockReset().mockResolvedValue(status);
@@ -59,6 +68,8 @@ beforeEach(() => {
   setPinnedResponder.mockReset().mockResolvedValue(undefined);
   clearPinnedResponder.mockReset().mockResolvedValue(undefined);
   recordAutomaticResponder.mockReset().mockResolvedValue(undefined);
+  disconnectSession.mockReset().mockResolvedValue(undefined);
+  connectSession.mockReset().mockResolvedValue(undefined);
 });
 
 afterEach(() => {
@@ -152,7 +163,13 @@ describe("funzzyStatus registration", () => {
 
     funzzyStatus(pi as never);
 
-    expect(commands).toEqual(["watcher-targets", "watcher-responder", "watcher-status"]);
+    expect(commands).toEqual([
+      "watcher-targets",
+      "watcher-responder",
+      "watcher-status",
+      "watcher-disconnect",
+      "watcher-connect",
+    ]);
   });
 
   it("does not preserve deprecated funzzy-prefixed slash commands", () => {
@@ -303,5 +320,83 @@ describe("watcher-responder command", () => {
     ]);
     expect(complete("c")).toEqual([{ value: "claim", label: "claim" }]);
     expect(complete("x")).toBeNull();
+  });
+});
+
+describe("watcher-disconnect command", () => {
+  it("persists the disconnect for this session and notifies", async () => {
+    const { ctx, handlers, notify } = createCommandHarness();
+
+    await handlers.get("watcher-disconnect")?.("", ctx as never);
+
+    expect(disconnectSession).toHaveBeenCalledWith("/tmp/funzzy.sock", "session-1");
+    expect(notify).toHaveBeenCalledWith("Watcher disconnected for this session", "info");
+  });
+
+  it("releases a pinned responder held by this session", async () => {
+    readResponder.mockResolvedValue({ mode: "pinned", sessionId: "session-1" });
+    const { ctx, handlers } = createCommandHarness();
+
+    await handlers.get("watcher-disconnect")?.("", ctx as never);
+
+    expect(clearPinnedResponder).toHaveBeenCalledWith("/tmp/funzzy.sock");
+  });
+
+  it("keeps a pinned responder held by another session", async () => {
+    readResponder.mockResolvedValue({ mode: "pinned", sessionId: "session-2" });
+    const { ctx, handlers } = createCommandHarness();
+
+    await handlers.get("watcher-disconnect")?.("", ctx as never);
+
+    expect(clearPinnedResponder).not.toHaveBeenCalled();
+  });
+
+  it("warns when the project is untrusted", async () => {
+    const { ctx, handlers, notify } = createCommandHarness();
+    ctx.isProjectTrusted = () => false;
+
+    await handlers.get("watcher-disconnect")?.("", ctx as never);
+
+    expect(notify).toHaveBeenCalledWith("Funzzy project configuration is not trusted", "warning");
+    expect(disconnectSession).not.toHaveBeenCalled();
+  });
+
+  it("notifies errors from the disconnect operation", async () => {
+    disconnectSession.mockRejectedValueOnce(new Error("permission denied"));
+    const { ctx, handlers, notify } = createCommandHarness();
+
+    await handlers.get("watcher-disconnect")?.("", ctx as never);
+
+    expect(notify).toHaveBeenCalledWith("permission denied", "error");
+  });
+});
+
+describe("watcher-connect command", () => {
+  it("persists the reconnect for this session and notifies", async () => {
+    const { ctx, handlers, notify } = createCommandHarness();
+
+    await handlers.get("watcher-connect")?.("", ctx as never);
+
+    expect(connectSession).toHaveBeenCalledWith("/tmp/funzzy.sock", "session-1");
+    expect(notify).toHaveBeenCalledWith("Watcher reconnected for this session", "info");
+  });
+
+  it("warns when the project is untrusted", async () => {
+    const { ctx, handlers, notify } = createCommandHarness();
+    ctx.isProjectTrusted = () => false;
+
+    await handlers.get("watcher-connect")?.("", ctx as never);
+
+    expect(notify).toHaveBeenCalledWith("Funzzy project configuration is not trusted", "warning");
+    expect(connectSession).not.toHaveBeenCalled();
+  });
+
+  it("notifies errors from the connect operation", async () => {
+    connectSession.mockRejectedValueOnce(new Error("permission denied"));
+    const { ctx, handlers, notify } = createCommandHarness();
+
+    await handlers.get("watcher-connect")?.("", ctx as never);
+
+    expect(notify).toHaveBeenCalledWith("permission denied", "error");
   });
 });

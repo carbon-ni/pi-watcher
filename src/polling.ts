@@ -17,6 +17,7 @@ export interface PollingDeps {
   readResponder: (socketPath: string) => Promise<Responder | null>;
   recordsAgentActivity: (toolName: string) => boolean;
   recordAutomaticResponder: (socketPath: string, sessionId: string) => Promise<void>;
+  isSessionDisconnected: (socketPath: string, sessionId: string) => Promise<boolean>;
   renderWatcherFooter: (status: WatcherStatus) => string;
   watcherStatusColor: (state: WatcherExecutionState) => WatcherStatusColor;
   formatStatus: (status: WatcherStatus) => string;
@@ -27,6 +28,8 @@ export interface PollingLifecycle {
   toolCall(event: ToolCallEvent, ctx: ExtensionContext): Promise<void>;
   agentSettled(): Promise<void>;
   sessionShutdown(ctx: ExtensionContext): Promise<void>;
+  disconnect(ctx: ExtensionContext): Promise<void>;
+  connect(ctx: ExtensionContext): Promise<void>;
 }
 
 const STATUS_KEY = "watcher-status";
@@ -53,49 +56,65 @@ export function createPollingLifecycle(pi: ExtensionAPI, deps: PollingDeps): Pol
     notifyFailure = undefined;
   };
 
+  const startWatching = async (config: FunzzyConfig, ctx: ExtensionContext): Promise<void> => {
+    activitySocketPath = config.socketPath;
+    notifyFailure = deps.createFailureNotifier(ctx.sessionManager.getSessionId(), (status) => {
+      pi.sendMessage(
+        {
+          customType: "funzzy-failure",
+          content: `Funzzy failed while this agent was idle. Investigate and fix the failure.\n${deps.formatStatus(status)}`,
+          display: true,
+          details: status,
+        },
+        { deliverAs: "followUp", triggerTurn: true },
+      );
+    });
+
+    let polling = false;
+    const poll = async () => {
+      if (polling) return;
+      polling = true;
+      try {
+        const status = await deps.queryStatus(config.socketPath);
+        if (pollStatus !== poll) return; // session reset or disconnected mid-flight
+        setWatcherStatus(
+          ctx,
+          deps.renderWatcherFooter(status),
+          deps.watcherStatusColor(status.state),
+        );
+        const responder = await deps.readResponder(config.socketPath);
+        if (pollStatus !== poll) return;
+        notifyFailure?.(status, ctx.isIdle(), responder?.sessionId ?? null);
+      } catch {
+        if (pollStatus === poll) setWatcherStatus(ctx, "watcher: unavailable", "warning");
+      } finally {
+        polling = false;
+      }
+    };
+
+    pollStatus = poll;
+    await poll();
+    pollTimer = setInterval(() => void poll(), config.pollIntervalMs);
+  };
+
+  const beginSession = async (ctx: ExtensionContext): Promise<void> => {
+    resetSessionState();
+    if (!ctx.isProjectTrusted()) return;
+    const config = await deps.readConfig(ctx.cwd);
+    if (!config || !ctx.hasUI) return;
+
+    const sessionId = ctx.sessionManager.getSessionId();
+    if (await deps.isSessionDisconnected(config.socketPath, sessionId)) {
+      ctx.ui.setStatus(STATUS_KEY, ctx.ui.theme.fg("muted", "watcher: disconnected"));
+      return;
+    }
+
+    await startWatching(config, ctx);
+  };
+
   return {
     async sessionStart(_event, ctx) {
-      resetSessionState();
-      if (!ctx.isProjectTrusted()) return;
-      const config = await deps.readConfig(ctx.cwd);
-      if (!config || !ctx.hasUI) return;
-
-      activitySocketPath = config.socketPath;
-      notifyFailure = deps.createFailureNotifier(ctx.sessionManager.getSessionId(), (status) => {
-        pi.sendMessage(
-          {
-            customType: "funzzy-failure",
-            content: `Funzzy failed while this agent was idle. Investigate and fix the failure.\n${deps.formatStatus(status)}`,
-            display: true,
-            details: status,
-          },
-          { deliverAs: "followUp", triggerTurn: true },
-        );
-      });
-
-      let polling = false;
-      const poll = async () => {
-        if (polling) return;
-        polling = true;
-        try {
-          const status = await deps.queryStatus(config.socketPath);
-          setWatcherStatus(
-            ctx,
-            deps.renderWatcherFooter(status),
-            deps.watcherStatusColor(status.state),
-          );
-          const responder = await deps.readResponder(config.socketPath);
-          notifyFailure?.(status, ctx.isIdle(), responder?.sessionId ?? null);
-        } catch {
-          setWatcherStatus(ctx, "watcher: unavailable", "warning");
-        } finally {
-          polling = false;
-        }
-      };
-
-      pollStatus = poll;
-      await poll();
-      pollTimer = setInterval(() => void poll(), config.pollIntervalMs);
+      await beginSession(ctx);
     },
 
     async toolCall(event, ctx) {
@@ -115,6 +134,16 @@ export function createPollingLifecycle(pi: ExtensionAPI, deps: PollingDeps): Pol
     async sessionShutdown(ctx) {
       resetSessionState();
       ctx.ui.setStatus(STATUS_KEY, undefined);
+    },
+
+    async disconnect(ctx) {
+      if (activitySocketPath === undefined) return;
+      resetSessionState();
+      ctx.ui.setStatus(STATUS_KEY, undefined);
+    },
+
+    async connect(ctx) {
+      await beginSession(ctx);
     },
   };
 }

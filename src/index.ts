@@ -14,8 +14,6 @@ import { createFailureNotifier } from "./domain/failure-notifier.js";
 import { recordsAgentActivity } from "./domain/activity.js";
 import {
   renderWatcherFooter,
-  rightAlignWatcherText,
-  WATCHER_WIDGET_OPTIONS,
   watcherStatusColor,
   type WatcherStatusColor,
 } from "./domain/status-presentation.js";
@@ -58,11 +56,11 @@ export default function funzzyStatus(pi: ExtensionAPI) {
       polling = true;
       try {
         const status = await queryStatus(config.socketPath);
-        setWatcherWidget(ctx, renderWatcherFooter(status), watcherStatusColor(status.state));
+        setWatcherStatus(ctx, renderWatcherFooter(status), watcherStatusColor(status.state));
         const responder = await readResponder(config.socketPath);
         notifyFailure?.(status, ctx.isIdle(), responder?.sessionId ?? null);
       } catch {
-        setWatcherWidget(ctx, "watcher: unavailable", "warning");
+        setWatcherStatus(ctx, "watcher: unavailable", "warning");
       } finally {
         polling = false;
       }
@@ -93,7 +91,7 @@ export default function funzzyStatus(pi: ExtensionAPI) {
     pollStatus = undefined;
     activitySocketPath = undefined;
     notifyFailure = undefined;
-    ctx.ui.setWidget(STATUS_KEY, undefined);
+    ctx.ui.setStatus(STATUS_KEY, undefined);
   });
 
   pi.registerTool({
@@ -308,15 +306,8 @@ export default function funzzyStatus(pi: ExtensionAPI) {
   });
 }
 
-function setWatcherWidget(ctx: ExtensionContext, text: string, color: WatcherStatusColor): void {
-  ctx.ui.setWidget(
-    STATUS_KEY,
-    (_tui, theme) => ({
-      render: (width) => [theme.fg(color, rightAlignWatcherText(text, width))],
-      invalidate: () => {},
-    }),
-    WATCHER_WIDGET_OPTIONS,
-  );
+function setWatcherStatus(ctx: ExtensionContext, text: string, color: WatcherStatusColor): void {
+  ctx.ui.setStatus(STATUS_KEY, ctx.ui.theme.fg(color, text));
 }
 
 function formatTargets(targets: FunzzyTarget[]): string {

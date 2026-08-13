@@ -1,6 +1,6 @@
 # Pi Watcher extension
 
-Pi extension that exposes Funzzy watcher state through `watcher_*` tools, `/watcher-*` commands, right-aligned widget below editor, and failure follow-ups.
+Pi extension that exposes Funzzy watcher state through `watcher_*` tools, `/watcher-*` commands, status bar entry, and failure follow-ups.
 
 ## Architecture route
 
@@ -22,7 +22,7 @@ Read nearest nested `AGENTS.md` before changing a layer. Do not add reverse depe
 
 - Tools: `watcher_status`, `watcher_targets`, `watcher_verify`.
 - Commands: `/watcher-status`, `/watcher-targets`, `/watcher-responder`.
-- Widget below editor uses `watcher:` terminology and state-aware theme colors.
+- Status bar entry uses `watcher:` terminology and state-aware theme colors.
 - Project contract is `.watch.yaml`/`.watch.yml` `on.socket`.
 
 Do not restore deprecated `funzzy_*` or `/funzzy-*` names. Funzzy remains infrastructure product name in protocol/errors/docs.

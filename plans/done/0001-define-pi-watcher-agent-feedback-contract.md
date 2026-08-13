@@ -1,7 +1,7 @@
 ---
 id: TASK-0001
 title: Define Pi watcher agent feedback contract
-status: todo
+status: done
 depends_on: []
 priority: high
 tags: [design, axi, domain, freshness, protocol]

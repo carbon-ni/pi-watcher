@@ -1,7 +1,7 @@
 ---
 id: TASK-0002
 title: Negotiate and decode correlated Funzzy capabilities
-status: todo
+status: done
 depends_on: [TASK-0001]
 priority: high
 tags: [typescript, domain, infra, protocol, capabilities, tdd]

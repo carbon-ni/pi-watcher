@@ -2,6 +2,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 import { waitForRun } from "./application/stable-run.js";
 import { requestVerifiedRun } from "./application/verify.js";
+import { requestObservation } from "./application/observe.js";
 import { recordsAgentActivity } from "./domain/activity.js";
 import { createFailureNotifier } from "./domain/failure-notifier.js";
 import { renderWatcherFooter, watcherStatusColor } from "./domain/status-presentation.js";
@@ -9,6 +10,7 @@ import { formatTargets } from "./domain/targets-presentation.js";
 import { formatStatus, listTargets, queryStatus, requestRun } from "./infra/client.js";
 import { CapabilityCache, loadCapabilities } from "./infra/capabilities.js";
 import { createPollingPort, createSubscriptionPort } from "./infra/observer.js";
+import { classifyObservationError } from "./infra/observe.js";
 import { createAtomicVerifyPort, createLegacyVerifyPort } from "./infra/verify.js";
 import { readConfig } from "./infra/config.js";
 import { worktreeFingerprint } from "./infra/fingerprint.js";
@@ -71,6 +73,14 @@ export default function funzzyStatus(pi: ExtensionAPI) {
       return requestVerifiedRun(request, { port, fingerprint, signal });
     },
     worktreeFingerprint,
+    createObservePort: async (config) => {
+      const profile = await loadCapabilities(config.socketPath, capabilityCache);
+      return profile.features.subscription && profile.features.correlatedSnapshots
+        ? createSubscriptionPort(config.socketPath)
+        : createPollingPort(queryStatus, config.socketPath, Math.min(config.pollIntervalMs, 250));
+    },
+    classifyObservationError,
+    requestObservation,
   });
 
   registerCommands(pi, {

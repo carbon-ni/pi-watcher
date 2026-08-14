@@ -173,7 +173,12 @@ describe("funzzyStatus registration", () => {
 
     funzzyStatus(pi as never);
 
-    expect(tools).toEqual(["watcher_status", "watcher_targets", "watcher_verify"]);
+    expect(tools).toEqual([
+      "watcher_status",
+      "watcher_targets",
+      "watcher_observe",
+      "watcher_verify",
+    ]);
     expect(tools).not.toContain("funzzy_status");
     expect(tools).not.toContain("funzzy_targets");
     expect(tools).not.toContain("funzzy_verify");

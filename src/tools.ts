@@ -3,9 +3,17 @@ import { Type } from "typebox";
 import type { WatcherStatus, WatcherTarget } from "./domain/watcher.js";
 import type { WatcherVerification, WatcherVerifyRequest } from "./domain/verification.js";
 import { formatVerification, selectTarget } from "./domain/verification.js";
+import {
+  formatObservation,
+  formatObservationProgress,
+  type WatcherObserveRequest,
+  type WatcherObservationResult,
+} from "./domain/observation-result.js";
 import type { RequireTrustedConfig } from "./trusted-config.js";
 import type { Exec } from "./infra/fingerprint.js";
 import type { FunzzyConfig } from "./infra/config.js";
+import type { ObserverPort } from "./application/observer.js";
+import type { ObserveDeps } from "./application/observe.js";
 
 export interface ToolDeps {
   requireTrustedConfig: RequireTrustedConfig;
@@ -28,6 +36,12 @@ export interface ToolDeps {
     signal?: AbortSignal,
   ) => Promise<WatcherVerification>;
   worktreeFingerprint: (cwd: string, exec: Exec) => Promise<string>;
+  createObservePort: (config: FunzzyConfig) => Promise<ObserverPort>;
+  classifyObservationError: (error: unknown) => "disconnect" | "unknown";
+  requestObservation: (
+    request: WatcherObserveRequest,
+    deps: ObserveDeps,
+  ) => Promise<WatcherObservationResult>;
 }
 
 export function registerTools(pi: ExtensionAPI, deps: ToolDeps): void {
@@ -96,6 +110,87 @@ export function registerTools(pi: ExtensionAPI, deps: ToolDeps): void {
       return {
         content: [{ type: "text", text: deps.formatTargets(targets) }],
         details: { targets },
+      };
+    },
+  });
+
+  pi.registerTool({
+    name: "watcher_observe",
+    label: "Watcher Observe",
+    description:
+      "Snapshot or atomically await the external Funzzy watcher state without triggering work",
+    promptSnippet: "Observe the external Funzzy watcher without rerunning tests",
+    promptGuidelines: [
+      "Call watcher_observe to snapshot watcher state or await the terminal result of a generation; it never triggers or cancels work.",
+      "Pass afterGeneration (a previously observed generation) with wait=true to await the first newer generation, e.g. after an edit.",
+    ],
+    parameters: Type.Object({
+      afterGeneration: Type.Optional(
+        Type.Integer({
+          minimum: 0,
+          description: "Wait for the first generation newer than this one (used with wait)",
+        }),
+      ),
+      wait: Type.Optional(
+        Type.Boolean({
+          description: "Wait for a terminal state or a generation after afterGeneration",
+        }),
+      ),
+      timeoutSeconds: Type.Optional(Type.Integer({ minimum: 1, maximum: 900 })),
+      updateIntervalSeconds: Type.Optional(Type.Integer({ minimum: 1, maximum: 60 })),
+      maxEvidenceLines: Type.Optional(
+        Type.Integer({
+          minimum: 0,
+          maximum: 40,
+          description: "Max failure evidence lines to include (0 = none; default 40)",
+        }),
+      ),
+    }),
+    async execute(_toolCallId, params, signal, onUpdate, ctx) {
+      const config = await deps.requireTrustedConfig(ctx);
+      const port = await deps.createObservePort(config);
+      const wait = params.wait ?? false;
+      const startedAt = Date.now();
+      let lastUpdateAt = 0;
+      let lastKey = "";
+
+      const result = await deps.requestObservation(
+        {
+          wait,
+          afterGeneration: params.afterGeneration ?? null,
+          timeoutMs: (params.timeoutSeconds ?? (wait ? 120 : 10)) * 1_000,
+          maxEvidenceLines: params.maxEvidenceLines,
+        },
+        {
+          port,
+          signal,
+          classifyError: deps.classifyObservationError,
+          onObservation: (observation) => {
+            const key = `${observation.status.generation}:${observation.status.state}`;
+            const now = Date.now();
+            const intervalMs = (params.updateIntervalSeconds ?? 5) * 1_000;
+            if (key !== lastKey || now - lastUpdateAt >= intervalMs) {
+              lastKey = key;
+              lastUpdateAt = now;
+              onUpdate?.({
+                content: [
+                  {
+                    type: "text",
+                    text: `${formatObservationProgress(observation)} waited=${Math.floor(
+                      (now - startedAt) / 1_000,
+                    )}s`,
+                  },
+                ],
+                details: observation,
+              });
+            }
+          },
+        },
+      );
+
+      return {
+        content: [{ type: "text", text: formatObservation(result) }],
+        details: result,
       };
     },
   });

@@ -1,4 +1,4 @@
-import type { WatcherFreshness } from "./capabilities.js";
+import type { WatcherCorrelatedSnapshot, WatcherFreshness } from "./capabilities.js";
 import type { WatcherStatus } from "./watcher.js";
 
 /**
@@ -6,6 +6,10 @@ import type { WatcherStatus } from "./watcher.js";
  * notifier (contract §7): one observation per transport event, carrying the
  * transport-local monotonic sequence, the decoded status, the guarantee
  * source, and the freshness tier. Transport callbacks never reach consumers.
+ *
+ * `snapshot` carries the full correlated payload when the transport
+ * negotiated it (contract §2); it is null on the legacy polled path where no
+ * correlation fields exist.
  */
 export type WatcherObservationSource = "subscription" | "polled";
 
@@ -16,6 +20,8 @@ export interface WatcherObservation {
   /** "polled" marks the legacy fallback with weaker freshness (contract §8). */
   source: WatcherObservationSource;
   freshness: WatcherFreshness;
+  /** Correlated snapshot (instance/batch/tasks/pending) or null on polled. */
+  snapshot: WatcherCorrelatedSnapshot | null;
 }
 
 /**

@@ -5,6 +5,8 @@ import { createRequireTrustedConfig } from "./trusted-config.js";
 import { formatStatus } from "./infra/client.js";
 import { formatTargets } from "./domain/targets-presentation.js";
 import type { WatcherVerification } from "./domain/verification.js";
+import type { WatcherObservationResult } from "./domain/observation-result.js";
+import type { WatcherObservation } from "./domain/observation.js";
 import type { WatcherStatus, WatcherTarget } from "./domain/watcher.js";
 
 const CONFIG = { socketPath: "/tmp/funzzy.sock", pollIntervalMs: 1_000 };
@@ -22,6 +24,57 @@ const TARGETS: WatcherTarget[] = [
   { name: "@agent-final", commands: ["make all"] },
   { name: "lint", commands: ["npm run lint"] },
 ];
+
+const OBS_RUNNING: WatcherObservation = {
+  sequence: 1,
+  status: {
+    generation: 5,
+    state: "running",
+    trigger: "src/index.ts",
+    commands: ["make all"],
+    durationMs: null,
+    failures: [],
+  },
+  source: "subscription",
+  freshness: "current",
+  snapshot: null,
+};
+
+const OBS_PASSED: WatcherObservation = {
+  sequence: 2,
+  status: {
+    generation: 5,
+    state: "passed",
+    trigger: "src/index.ts",
+    commands: ["make all"],
+    durationMs: 42,
+    failures: [],
+  },
+  source: "subscription",
+  freshness: "current",
+  snapshot: null,
+};
+
+const OBSERVE_RESULT: WatcherObservationResult = {
+  outcome: "terminal",
+  instance: null,
+  generation: 5,
+  batchId: null,
+  state: "passed",
+  durationMs: 42,
+  trigger: "src/index.ts",
+  freshness: "current",
+  source: "subscription",
+  tasks: [],
+  pending: null,
+  failures: [],
+  truncated: false,
+  evidenceLines: 0,
+  nextAction: null,
+  supersedingGeneration: null,
+  waitedMs: 0,
+  message: null,
+};
 
 type RegisteredToolCapture = {
   name: string;
@@ -79,6 +132,13 @@ function createDeps(overrides: Record<string, unknown> = {}) {
     formatTargets,
     verifyRequest: vi.fn().mockResolvedValue(verification),
     worktreeFingerprint: vi.fn().mockResolvedValue("abc123"),
+    createObservePort: vi.fn().mockResolvedValue({
+      open: async function* () {
+        yield OBS_RUNNING;
+      },
+    }),
+    classifyObservationError: vi.fn<(error: unknown) => "disconnect" | "unknown">(() => "unknown"),
+    requestObservation: vi.fn().mockResolvedValue(OBSERVE_RESULT),
     ...overrides,
   };
 }
@@ -98,7 +158,7 @@ function registeredTool(tools: RegisteredToolCapture[], name: string) {
 }
 
 describe("registerTools", () => {
-  it("registers the three watcher-prefixed tools", () => {
+  it("registers the four watcher-prefixed tools", () => {
     const { pi, tools } = createPi();
 
     registerTools(pi as never, createDeps());
@@ -106,6 +166,7 @@ describe("registerTools", () => {
     expect(tools.map((tool) => tool.name)).toEqual([
       "watcher_status",
       "watcher_targets",
+      "watcher_observe",
       "watcher_verify",
     ]);
   });
@@ -225,6 +286,135 @@ describe("watcher_targets", () => {
       ],
       details: { targets: TARGETS },
     });
+  });
+});
+
+describe("watcher_observe", () => {
+  it("returns a compact observation result for a trusted configured project", async () => {
+    const { pi, tools } = createPi();
+    registerTools(pi as never, createDeps());
+
+    const result = await runTool(registeredTool(tools, "watcher_observe"), {}, trustedCtx());
+
+    expect(result).toEqual({
+      content: [{ type: "text", text: "PASS gen=5 freshness=current duration=42ms" }],
+      details: OBSERVE_RESULT,
+    });
+  });
+
+  it("waits with an explicit timeout and afterGeneration passthrough", async () => {
+    const { pi, tools } = createPi();
+    const requestObservation = vi.fn().mockResolvedValue(OBSERVE_RESULT);
+    const port = {
+      open: async function* () {
+        yield OBS_RUNNING;
+      },
+    };
+    const createObservePort = vi.fn().mockResolvedValue(port);
+    registerTools(pi as never, createDeps({ requestObservation, createObservePort }));
+
+    await runTool(
+      registeredTool(tools, "watcher_observe"),
+      { wait: true, afterGeneration: 4, timeoutSeconds: 90 },
+      trustedCtx(),
+    );
+
+    expect(requestObservation).toHaveBeenCalledWith(
+      {
+        wait: true,
+        afterGeneration: 4,
+        timeoutMs: 90_000,
+      },
+      expect.objectContaining({ port }),
+    );
+  });
+
+  it("uses a shorter default timeout for snapshots", async () => {
+    const { pi, tools } = createPi();
+    const requestObservation = vi.fn().mockResolvedValue(OBSERVE_RESULT);
+    registerTools(pi as never, createDeps({ requestObservation }));
+
+    await runTool(registeredTool(tools, "watcher_observe"), {}, trustedCtx());
+
+    expect(requestObservation).toHaveBeenCalledWith(
+      expect.objectContaining({ wait: false, timeoutMs: 10_000 }),
+      expect.anything(),
+    );
+  });
+
+  it("propagates the tool abort signal into the observation only", async () => {
+    const { pi, tools } = createPi();
+    const requestObservation = vi.fn().mockResolvedValue({ ...OBSERVE_RESULT, outcome: "aborted" });
+    registerTools(pi as never, createDeps({ requestObservation }));
+    const controller = new AbortController();
+    const tool = registeredTool(tools, "watcher_observe")!;
+
+    await tool.execute("1", { wait: true }, controller.signal, undefined, trustedCtx());
+
+    expect(requestObservation).toHaveBeenCalledWith(
+      expect.objectContaining({ wait: true }),
+      expect.objectContaining({ signal: controller.signal }),
+    );
+  });
+
+  it("rate-bounds progress updates to meaningful state changes or the heartbeat interval", async () => {
+    vi.useFakeTimers();
+    const { pi, tools } = createPi();
+    const requestObservation = vi.fn(
+      async (_request: unknown, deps: { onObservation?: (o: WatcherObservation) => void }) => {
+        deps.onObservation?.(OBS_RUNNING);
+        deps.onObservation?.(OBS_RUNNING);
+        deps.onObservation?.(OBS_RUNNING);
+        await vi.advanceTimersByTimeAsync(6_000);
+        deps.onObservation?.(OBS_RUNNING);
+        deps.onObservation?.(OBS_PASSED);
+        return OBSERVE_RESULT;
+      },
+    );
+    registerTools(pi as never, createDeps({ requestObservation }));
+    const tool = registeredTool(tools, "watcher_observe")!;
+    const onUpdate =
+      vi.fn<
+        (update: { content: Array<{ type: string; text: string }>; details: unknown }) => void
+      >();
+
+    await tool.execute(
+      "1",
+      { wait: true, updateIntervalSeconds: 5 },
+      undefined,
+      onUpdate,
+      trustedCtx(),
+    );
+
+    // first observation, heartbeat after the interval, state change at the end
+    expect(onUpdate).toHaveBeenCalledTimes(3);
+    const texts = onUpdate.mock.calls.map((call) => call[0].content[0]!.text);
+    expect(texts[0]!).toMatch(/^RUNNING gen=5 freshness=current/);
+    expect(texts[0]!).toMatch(/waited=\d+s$/);
+    expect(texts[2]!).toMatch(/^PASS gen=5 freshness=current/);
+  });
+
+  it("does not emit progress for a snapshot-only call", async () => {
+    const { pi, tools } = createPi();
+    const requestObservation = vi.fn().mockResolvedValue(OBSERVE_RESULT);
+    registerTools(pi as never, createDeps({ requestObservation }));
+    const tool = registeredTool(tools, "watcher_observe")!;
+    const onUpdate = vi.fn();
+
+    await tool.execute("1", {}, undefined, onUpdate, trustedCtx());
+
+    expect(onUpdate).not.toHaveBeenCalled();
+  });
+
+  it("rejects untrusted projects before opening an observation port", async () => {
+    const { pi, tools } = createPi();
+    const createObservePort = vi.fn();
+    registerTools(pi as never, createDeps({ createObservePort }));
+
+    await expect(
+      runTool(registeredTool(tools, "watcher_observe"), {}, trustedCtx(false)),
+    ).rejects.toThrow("Funzzy project configuration is not trusted");
+    expect(createObservePort).not.toHaveBeenCalled();
   });
 });
 

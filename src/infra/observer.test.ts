@@ -80,6 +80,7 @@ describe("createPollingPort", () => {
     assert.equal(first.value.source, "polled");
     assert.equal(first.value.freshness, "current");
     assert.equal(first.value.status, STATUS);
+    assert.equal(first.value.snapshot, null);
 
     controller.abort();
     const afterAbort = await port.open(controller.signal).next();
@@ -133,8 +134,10 @@ describe("createSubscriptionPort", () => {
         assert.equal(first.freshness, "current");
         assert.equal(first.status.generation, 4);
         assert.equal(first.status.commands[0], "make all");
+        assert.deepEqual(first.snapshot, SNAPSHOT);
         assert.equal(second.sequence, 2);
         assert.equal(second.status.generation, 5);
+        assert.deepEqual(second.snapshot, { ...SNAPSHOT, generation: 5 });
       },
     );
   });

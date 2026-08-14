@@ -18,6 +18,7 @@ const OBSERVATION: WatcherObservation = {
   },
   source: "subscription",
   freshness: "current",
+  snapshot: null,
 };
 
 describe("shouldForwardObservation", () => {

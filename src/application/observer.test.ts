@@ -15,6 +15,7 @@ const OBSERVATION: WatcherObservation = {
   },
   source: "subscription",
   freshness: "current",
+  snapshot: null,
 };
 
 /** One controllable stream per port.open call. */

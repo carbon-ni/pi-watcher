@@ -37,7 +37,7 @@ export function createPollingPort(
         const status = await queryStatus(socketPath);
         if (signal.aborted) return;
         sequence += 1;
-        yield { sequence, status, source: "polled", freshness: "current" };
+        yield { sequence, status, source: "polled", freshness: "current", snapshot: null };
         await abortableDelay(pollIntervalMs, signal);
       }
     },
@@ -103,6 +103,7 @@ function observationFromSnapshot(
     status: snapshotToStatus(snapshot),
     source: "subscription",
     freshness: snapshot.freshness,
+    snapshot,
   };
 }
 

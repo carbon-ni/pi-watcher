@@ -28,7 +28,13 @@ const STATUS: WatcherStatus = {
 
 const SUBSCRIPTION_PORT_STUB: ObserverPort = {
   async *open() {
-    yield { sequence: 1, status: STATUS, source: "subscription", freshness: "current" };
+    yield {
+      sequence: 1,
+      status: STATUS,
+      source: "subscription",
+      freshness: "current",
+      snapshot: null,
+    };
   },
 };
 

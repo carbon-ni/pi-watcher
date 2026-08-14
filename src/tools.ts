@@ -20,6 +20,7 @@ import {
   type WatcherCancelResult,
 } from "./domain/cancel.js";
 import { failureEngagementKeyParts } from "./domain/failure-notifier.js";
+import type { EditCheckpoint } from "./domain/correlation.js";
 import type { RequireTrustedConfig } from "./trusted-config.js";
 import type { Exec } from "./infra/fingerprint.js";
 import type { FunzzyConfig } from "./infra/config.js";
@@ -67,6 +68,8 @@ export interface ToolDeps {
   ) => Promise<WatcherCancelResult>;
   /** Record that this session already saw a failed generation (no follow-up). */
   recordHandledFailure: (sessionId: string, key: string) => void;
+  /** Session edit checkpoint used to classify batch correlation. */
+  readEditCheckpoint: (sessionId: string) => EditCheckpoint | null;
 }
 
 export function registerTools(pi: ExtensionAPI, deps: ToolDeps): void {
@@ -190,6 +193,8 @@ export function registerTools(pi: ExtensionAPI, deps: ToolDeps): void {
           port,
           signal,
           classifyError: deps.classifyObservationError,
+          checkpoint: deps.readEditCheckpoint(ctx.sessionManager.getSessionId()),
+          projectRoot: ctx.cwd,
           onObservation: (observation) => {
             const key = `${observation.status.generation}:${observation.status.state}`;
             const now = Date.now();

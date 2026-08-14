@@ -44,7 +44,7 @@ describe("decodeWatcherCapabilities", () => {
     expect(profile.instance.token).toBe("fz-7f3a");
     expect(profile.instance.startedAtEpochMs).toBe(1710000000000);
     expect(profile.methods).toContain("subscribe");
-    expect(profile.optionalFields).toEqual(["batchId", "pending", "tasks"]);
+    expect(profile.optionalFields).toEqual(["batchId", "pending", "tasks", "paths"]);
     expect(profile.limits.outputRetentionBytes).toBe(1048576);
     expect(profile.features).toEqual({
       atomicAwait: true,
@@ -141,6 +141,7 @@ describe("decodeWatcherCorrelatedSnapshot", () => {
       freshness: "current",
       durationMs: null,
       failures: [],
+      paths: [],
     });
   });
 
@@ -153,6 +154,11 @@ describe("decodeWatcherCorrelatedSnapshot", () => {
     expect(snapshot.tasks).toEqual([
       { id: "t-1", name: "test @agent-final", state: "passed", durationMs: 42 },
     ]);
+    expect(snapshot.paths).toEqual(["src/main.rs", "src/lib.rs"]);
+  });
+
+  it("defaults missing batch paths to an empty list", () => {
+    expect(decodeWatcherCorrelatedSnapshot(minimum).paths).toEqual([]);
   });
 
   it("rejects a malformed batch field", () => {

@@ -3,12 +3,18 @@ import type {
   ExtensionContext,
   SessionStartEvent,
   ToolCallEvent,
+  ToolResultEvent,
 } from "@earendil-works/pi-coding-agent";
 import type { FunzzyConfig } from "./infra/config.js";
 import type { Responder } from "./infra/ownership.js";
 import type { WatcherExecutionState, WatcherStatus } from "./domain/watcher.js";
 import type { WatcherStatusColor } from "./domain/status-presentation.js";
 import { observationFooterSuffix } from "./domain/observation.js";
+import {
+  normalizeEditPaths,
+  recordEditCheckpoint,
+  type EditCheckpoint,
+} from "./domain/correlation.js";
 import type { WatcherCapabilityProfile } from "./domain/capabilities.js";
 import { createObserver, type ObserverPort } from "./application/observer.js";
 import type { createFailureNotifier } from "./domain/failure-notifier.js";
@@ -28,6 +34,10 @@ export interface PollingDeps {
   isHandledFailure: (sessionId: string, key: string) => boolean;
   /** Atomic cross-session at-most-once delivery claim. */
   claimFailureDelivery: (socketPath: string, key: string) => Promise<boolean>;
+  /** Record the session edit checkpoint (bounded, instance scoped). */
+  recordEditCheckpoint: (sessionId: string, checkpoint: EditCheckpoint) => void;
+  readEditCheckpoint: (sessionId: string) => EditCheckpoint | null;
+  clearEditCheckpoint: (sessionId: string) => void;
   renderWatcherFooter: (status: WatcherStatus) => string;
   watcherStatusColor: (state: WatcherExecutionState) => WatcherStatusColor;
   formatStatus: (status: WatcherStatus) => string;
@@ -36,6 +46,7 @@ export interface PollingDeps {
 export interface PollingLifecycle {
   sessionStart(event: SessionStartEvent, ctx: ExtensionContext): Promise<void>;
   toolCall(event: ToolCallEvent, ctx: ExtensionContext): Promise<void>;
+  toolResult(event: ToolResultEvent, ctx: ExtensionContext): Promise<void>;
   agentSettled(): Promise<void>;
   sessionShutdown(ctx: ExtensionContext): Promise<void>;
   disconnect(ctx: ExtensionContext): Promise<void>;
@@ -48,6 +59,7 @@ export function createPollingLifecycle(pi: ExtensionAPI, deps: PollingDeps): Pol
   let observer: ReturnType<typeof createObserver> | undefined;
   let activitySocketPath: string | undefined;
   let notifyFailure: ReturnType<typeof createFailureNotifier> | undefined;
+  let watcherInstanceToken: string | null = null;
 
   const setWatcherStatus = (
     ctx: ExtensionContext,
@@ -62,6 +74,7 @@ export function createPollingLifecycle(pi: ExtensionAPI, deps: PollingDeps): Pol
     observer = undefined;
     activitySocketPath = undefined;
     notifyFailure = undefined;
+    watcherInstanceToken = null;
   };
 
   const startWatching = async (config: FunzzyConfig, ctx: ExtensionContext): Promise<void> => {
@@ -90,6 +103,7 @@ export function createPollingLifecycle(pi: ExtensionAPI, deps: PollingDeps): Pol
     // supports it, legacy polling otherwise. Polled observations are marked
     // with the weaker-freshness footer suffix by the sink below.
     const profile = await deps.loadCapabilities(config.socketPath);
+    watcherInstanceToken = profile.instance.token;
     const port =
       profile.features.subscription && profile.features.correlatedSnapshots
         ? deps.createSubscriptionPort(config.socketPath)
@@ -106,6 +120,13 @@ export function createPollingLifecycle(pi: ExtensionAPI, deps: PollingDeps): Pol
               observationFooterSuffix(observation.source),
             deps.watcherStatusColor(observation.status.state),
           );
+          // A checkpoint recorded under a previous watcher instance is stale:
+          // clear it so correlation cannot cross instance boundaries.
+          const checkpoint = deps.readEditCheckpoint(sessionId);
+          const observedInstance = observation.snapshot?.instance.token ?? watcherInstanceToken;
+          if (checkpoint !== null && checkpoint.instanceToken !== observedInstance) {
+            deps.clearEditCheckpoint(sessionId);
+          }
           void deps.readResponder(config.socketPath).then((responder) => {
             if (observer !== current) return;
             void notifyFailure?.(observation, ctx.isIdle(), responder?.sessionId ?? null);
@@ -151,6 +172,23 @@ export function createPollingLifecycle(pi: ExtensionAPI, deps: PollingDeps): Pol
       }
     },
 
+    async toolResult(event, ctx) {
+      if (!activitySocketPath) return;
+      // Only successful edit/write results create a checkpoint; unsupported
+      // tools (e.g. bash) never have paths guessed from prose or output.
+      const paths = editedPathsFromResult(event);
+      if (paths.length === 0) return;
+
+      const sessionId = ctx.sessionManager.getSessionId();
+      const next = recordEditCheckpoint(
+        deps.readEditCheckpoint(sessionId),
+        normalizeEditPaths(paths, ctx.cwd),
+        watcherInstanceToken,
+        Date.now(),
+      );
+      if (next.paths.length > 0) deps.recordEditCheckpoint(sessionId, next);
+    },
+
     async agentSettled() {
       // Push-driven: observations carry failures; no polling flush is needed.
     },
@@ -172,4 +210,16 @@ export function createPollingLifecycle(pi: ExtensionAPI, deps: PollingDeps): Pol
       await beginSession(ctx);
     },
   };
+}
+
+/**
+ * Extract edited paths from a successful edit/write tool result. Unsupported
+ * tools return nothing; paths are never guessed from prose or command output.
+ */
+function editedPathsFromResult(event: ToolResultEvent): string[] {
+  if (event.isError) return [];
+  if (event.toolName !== "edit" && event.toolName !== "write") return [];
+  const path = event.input?.["path"];
+  if (typeof path !== "string") return [];
+  return [path];
 }

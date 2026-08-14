@@ -8,6 +8,7 @@ Owns watcher vocabulary and deterministic decisions.
 - `activity.ts`: decides which Pi tool calls represent worktree activity (conservative: bash/edit/write only).
 - `failure-notifier.ts`: decides whether one terminal fresh failure should be delivered — owner gate, stale-freshness gate, handled-generation gate, and an atomic cross-session delivery claim for at-most-once.
 - `ownership.ts`: automatic-owner activity policy (expiry TTL), separate from persistence.
+- `correlation.ts`: edit-to-batch correlation policy — path normalization against the trusted root, bounded session checkpoints, and the exact/no/incomplete/unknown classifier (evidence of inclusion, never causation).
 - `status-presentation.ts`: renders and colors compact user-facing watcher status.
 - `observation-result.ts`: builds and formats one decision-oriented `watcher_observe` result (outcomes, evidence bounds, next-action hints).
 - `output.ts`: decodes and bounds one `watcher_output` retrieval (identity, observed/retained bytes, eviction, truncation) and formats it without terminal-width dependence.

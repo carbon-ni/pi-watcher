@@ -9,6 +9,7 @@ import { createFailureNotifier } from "./domain/failure-notifier.js";
 import { renderWatcherFooter, watcherStatusColor } from "./domain/status-presentation.js";
 import { formatTargets } from "./domain/targets-presentation.js";
 import { WatcherOutputUnavailableError } from "./domain/output.js";
+import type { EditCheckpoint } from "./domain/correlation.js";
 import {
   formatStatus,
   listTargets,
@@ -64,6 +65,18 @@ export default function funzzyStatus(pi: ExtensionAPI) {
     );
   };
 
+  // Session edit checkpoints for batch correlation (contract §9): bounded,
+  // per-session, cleared on watcher instance change by the lifecycle.
+  const editCheckpoints = new Map<string, EditCheckpoint>();
+  const recordEditCheckpoint = (sessionId: string, checkpoint: EditCheckpoint): void => {
+    editCheckpoints.set(sessionId, checkpoint);
+  };
+  const readEditCheckpoint = (sessionId: string): EditCheckpoint | null =>
+    editCheckpoints.get(sessionId) ?? null;
+  const clearEditCheckpoint = (sessionId: string): void => {
+    editCheckpoints.delete(sessionId);
+  };
+
   const lifecycle = createPollingLifecycle(pi, {
     readConfig,
     createFailureNotifier,
@@ -78,6 +91,9 @@ export default function funzzyStatus(pi: ExtensionAPI) {
     isSessionDisconnected,
     isHandledFailure,
     claimFailureDelivery,
+    recordEditCheckpoint,
+    readEditCheckpoint,
+    clearEditCheckpoint,
     renderWatcherFooter,
     watcherStatusColor,
     formatStatus,
@@ -85,6 +101,7 @@ export default function funzzyStatus(pi: ExtensionAPI) {
 
   pi.on("session_start", (event, ctx) => lifecycle.sessionStart(event, ctx));
   pi.on("tool_call", (event, ctx) => lifecycle.toolCall(event, ctx));
+  pi.on("tool_result", (event, ctx) => lifecycle.toolResult(event, ctx));
   pi.on("agent_settled", () => lifecycle.agentSettled());
   pi.on("session_shutdown", (_event, ctx) => lifecycle.sessionShutdown(ctx));
 
@@ -118,6 +135,7 @@ export default function funzzyStatus(pi: ExtensionAPI) {
     classifyObservationError,
     requestObservation,
     recordHandledFailure,
+    readEditCheckpoint,
     requestOutput: async (socketPath, request, signal) => {
       const profile = await loadCapabilities(socketPath, capabilityCache);
       if (!profile.features.outputRetrieval) {

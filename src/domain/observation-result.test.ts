@@ -23,6 +23,7 @@ const SNAPSHOT: WatcherCorrelatedSnapshot = {
   freshness: "current",
   durationMs: 120,
   failures: ["boom: failed to lint", "boom: second failure"],
+  paths: [],
 };
 
 const OBSERVATION: WatcherObservation = {
@@ -251,6 +252,7 @@ describe("formatObservation", () => {
         freshness: "current",
         durationMs: null,
         failures: [],
+        paths: [],
       },
     };
 

@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { ToolResultEvent } from "@earendil-works/pi-coding-agent";
 
 import { createPollingLifecycle, type PollingDeps } from "./polling.js";
 import { createPollingPort, type QueryStatusFn } from "./infra/observer.js";
@@ -92,6 +93,9 @@ function createDeps(overrides: Partial<Deps> = {}): Deps {
     isSessionDisconnected: vi.fn().mockResolvedValue(false),
     isHandledFailure: vi.fn<(sessionId: string, key: string) => boolean>(() => false),
     claimFailureDelivery: vi.fn(async () => true),
+    recordEditCheckpoint: vi.fn(),
+    readEditCheckpoint: vi.fn().mockReturnValue(null),
+    clearEditCheckpoint: vi.fn(),
     renderWatcherFooter,
     watcherStatusColor,
     formatStatus,
@@ -293,6 +297,159 @@ describe("failure delivery", () => {
     await flush();
 
     expect(sendMessage).not.toHaveBeenCalled();
+  });
+});
+
+describe("edit correlation checkpoints", () => {
+  const editResult = (overrides: Partial<ToolResultEvent> = {}): ToolResultEvent => ({
+    type: "tool_result",
+    toolCallId: "1",
+    toolName: "edit",
+    input: { path: "src/index.ts" },
+    content: [],
+    isError: false,
+    ...overrides,
+  });
+
+  it("records a checkpoint for a successful edit result", async () => {
+    const { ctx, deps, lifecycle } = createHarness();
+    await lifecycle.sessionStart({} as never, ctx as never);
+
+    await lifecycle.toolResult(editResult(), ctx as never);
+
+    expect(deps.recordEditCheckpoint).toHaveBeenCalledWith(
+      "session-1",
+      expect.objectContaining({ instanceToken: "", paths: ["src/index.ts"] }),
+    );
+  });
+
+  it("never records a failed edit result", async () => {
+    const { ctx, deps, lifecycle } = createHarness();
+    await lifecycle.sessionStart({} as never, ctx as never);
+
+    await lifecycle.toolResult(editResult({ isError: true }), ctx as never);
+
+    expect(deps.recordEditCheckpoint).not.toHaveBeenCalled();
+  });
+
+  it("records a successful write result", async () => {
+    const { ctx, deps, lifecycle } = createHarness();
+    await lifecycle.sessionStart({} as never, ctx as never);
+
+    await lifecycle.toolResult(
+      editResult({ toolName: "write", input: { path: "/project/src/app.ts", content: "x" } }),
+      ctx as never,
+    );
+
+    expect(deps.recordEditCheckpoint).toHaveBeenCalledWith(
+      "session-1",
+      expect.objectContaining({ paths: ["src/app.ts"] }),
+    );
+  });
+
+  it("records a successful write result to a generated path", async () => {
+    const { ctx, deps, lifecycle } = createHarness();
+    await lifecycle.sessionStart({} as never, ctx as never);
+
+    await lifecycle.toolResult(
+      editResult({ toolName: "write", input: { path: "dist/bundle.js", content: "x" } }),
+      ctx as never,
+    );
+
+    expect(deps.recordEditCheckpoint).toHaveBeenCalledWith(
+      "session-1",
+      expect.objectContaining({ paths: ["dist/bundle.js"] }),
+    );
+  });
+
+  it("keeps checkpoints session-scoped", async () => {
+    const { ctx, deps, lifecycle } = createHarness();
+    const otherCtx = {
+      ...ctx,
+      sessionManager: { getSessionId: () => "session-2" },
+    };
+    await lifecycle.sessionStart({} as never, ctx as never);
+
+    await lifecycle.toolResult(editResult(), ctx as never);
+    await lifecycle.toolResult(editResult(), otherCtx as never);
+
+    expect(deps.recordEditCheckpoint).toHaveBeenNthCalledWith(1, "session-1", expect.anything());
+    expect(deps.recordEditCheckpoint).toHaveBeenNthCalledWith(2, "session-2", expect.anything());
+  });
+
+  it("never guesses paths from bash results", async () => {
+    const { ctx, deps, lifecycle } = createHarness();
+    await lifecycle.sessionStart({} as never, ctx as never);
+
+    await lifecycle.toolResult(
+      editResult({ toolName: "bash", input: { command: "echo hi" } }),
+      ctx as never,
+    );
+
+    expect(deps.recordEditCheckpoint).not.toHaveBeenCalled();
+  });
+
+  it("does not record results without a running watcher", async () => {
+    const { ctx, deps, lifecycle } = createHarness();
+
+    await lifecycle.toolResult(editResult(), ctx as never);
+
+    expect(deps.recordEditCheckpoint).not.toHaveBeenCalled();
+  });
+
+  it("clears the checkpoint when the watcher instance changed", async () => {
+    const changedPort: ObserverPort = {
+      async *open() {
+        yield {
+          sequence: 1,
+          status: STATUS,
+          source: "subscription",
+          freshness: "current",
+          snapshot: {
+            instance: { token: "fz-9b21", startedAtEpochMs: 0 },
+            generation: 7,
+            batchId: "b-1",
+            state: "passed",
+            trigger: null,
+            commands: [],
+            tasks: [],
+            pending: 0,
+            freshness: "current",
+            durationMs: 42,
+            failures: [],
+            paths: [],
+          },
+        };
+      },
+    };
+    const { ctx, deps, lifecycle } = createHarness({
+      createSubscriptionPort: vi.fn(() => changedPort),
+      readEditCheckpoint: vi.fn().mockReturnValue({
+        instanceToken: "fz-7f3a",
+        paths: ["src/index.ts"],
+        at: 1_000,
+      }),
+    });
+
+    await lifecycle.sessionStart({} as never, ctx as never);
+    await flush();
+
+    expect(deps.clearEditCheckpoint).toHaveBeenCalledWith("session-1");
+  });
+
+  it("keeps the checkpoint when the watcher instance is unchanged", async () => {
+    const { ctx, deps, lifecycle } = createHarness({
+      readEditCheckpoint: vi.fn().mockReturnValue({
+        instanceToken: "",
+        paths: ["src/index.ts"],
+        at: 1_000,
+      }),
+    });
+
+    await lifecycle.sessionStart({} as never, ctx as never);
+    await flush();
+
+    expect(deps.clearEditCheckpoint).not.toHaveBeenCalled();
   });
 });
 

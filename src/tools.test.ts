@@ -77,6 +77,7 @@ const OBSERVE_RESULT: WatcherObservationResult = {
   supersedingGeneration: null,
   waitedMs: 0,
   message: null,
+  correlation: "unknown",
 };
 
 const OUTPUT_RESULT: WatcherOutputResult = {
@@ -160,6 +161,7 @@ function createDeps(overrides: Record<string, unknown> = {}) {
       .fn()
       .mockResolvedValue({ outcome: "cancelled", generation: 7, message: null }),
     recordHandledFailure: vi.fn(),
+    readEditCheckpoint: vi.fn().mockReturnValue(null),
     ...overrides,
   };
 }
@@ -432,6 +434,34 @@ describe("watcher_observe", () => {
     await tool.execute("1", {}, undefined, onUpdate, trustedCtx());
 
     expect(onUpdate).not.toHaveBeenCalled();
+  });
+
+  it("passes the session checkpoint and project root for batch correlation", async () => {
+    const { pi, tools } = createPi();
+    const requestObservation = vi.fn().mockResolvedValue({
+      ...OBSERVE_RESULT,
+      correlation: "exact-overlap",
+    });
+    const checkpoint = {
+      instanceToken: "fz-7f3a",
+      paths: ["src/index.ts"],
+      at: 1_000,
+    };
+    const readEditCheckpoint = vi.fn().mockReturnValue(checkpoint);
+    registerTools(pi as never, createDeps({ requestObservation, readEditCheckpoint }));
+
+    const result = await runTool(
+      registeredTool(tools, "watcher_observe"),
+      { wait: true },
+      trustedCtx(),
+    );
+
+    expect(readEditCheckpoint).toHaveBeenCalledWith("session-1");
+    expect(requestObservation).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ checkpoint, projectRoot: "/project" }),
+    );
+    expect(result.details).toMatchObject({ correlation: "exact-overlap" });
   });
 
   it("rejects untrusted projects before opening an observation port", async () => {

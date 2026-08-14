@@ -94,6 +94,8 @@ export interface WatcherCorrelatedSnapshot {
   freshness: WatcherFreshness;
   durationMs: number | null;
   failures: string[];
+  /** Changed paths of the batch (optional; empty when unreported). */
+  paths: string[];
 }
 
 /**
@@ -171,6 +173,7 @@ export function decodeWatcherCorrelatedSnapshot(value: unknown): WatcherCorrelat
   const freshness = readFreshness(object);
   const durationMs = readOptionalNullableNumber(object, "durationMs");
   const failures = readOptionalStringArray(object, "failures", "correlated snapshot");
+  const paths = readOptionalStringArray(object, "paths", "correlated snapshot");
 
   return {
     instance,
@@ -184,6 +187,7 @@ export function decodeWatcherCorrelatedSnapshot(value: unknown): WatcherCorrelat
     freshness,
     durationMs,
     failures,
+    paths,
   };
 }
 

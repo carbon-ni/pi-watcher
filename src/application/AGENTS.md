@@ -6,7 +6,7 @@ Owns watcher use cases that coordinate domain values without choosing infrastruc
 
 `stable-run.ts` requests target generation, polls status, rejects stale worktrees, and retries superseded generations only while worktree identity remains current.
 
-`observe.ts` snapshots or bounded-waits one observer port: terminal completion, explicit no-op, supersession, timeout, abort, and freshness labeling; it never triggers or cancels Funzzy work.
+`observe.ts` snapshots or bounded-waits one observer port: terminal completion, explicit no-op, supersession, timeout, abort, freshness labeling, and batch correlation against the session edit checkpoint; it never triggers or cancels Funzzy work.
 
 ## Relations
 

@@ -4,6 +4,7 @@ import type { ObserverPort } from "./observer.js";
 import { requestObservation } from "./observe.js";
 import type { WatcherObservation } from "../domain/observation.js";
 import { observationResult } from "../domain/observation-result.js";
+import type { EditCheckpoint } from "../domain/correlation.js";
 import type { WatcherFreshness, WatcherCorrelatedSnapshot } from "../domain/capabilities.js";
 import type { WatcherExecutionState } from "../domain/watcher.js";
 
@@ -19,6 +20,7 @@ const SNAPSHOT: WatcherCorrelatedSnapshot = {
   freshness: "current",
   durationMs: null,
   failures: [],
+  paths: ["src/index.ts"],
 };
 
 interface ObservationOverrides {
@@ -128,6 +130,8 @@ function createHarness() {
     deps: {
       port: scripted.port,
       onObservation,
+      checkpoint: null as EditCheckpoint | null,
+      projectRoot: "/project",
       classifyError: (error: unknown) =>
         error instanceof Error && /disconnect|unavailable|socket/.test(error.message)
           ? ("disconnect" as const)
@@ -372,6 +376,57 @@ describe("requestObservation wait mode", () => {
   });
 });
 
+describe("requestObservation correlation", () => {
+  const checkpoint = (): EditCheckpoint => ({
+    instanceToken: "fz-7f3a",
+    paths: ["src/index.ts"],
+    at: 1_000,
+  });
+
+  it("classifies exact overlap between the session checkpoint and the batch paths", async () => {
+    const { scripted, deps } = createHarness();
+    const promise = requestObservation({ wait: false }, { ...deps, checkpoint: checkpoint() });
+    await flush();
+    scripted.stream().push(observation(5, "passed"));
+
+    const result = await promise;
+    expect(result.correlation).toBe("exact-overlap");
+  });
+
+  it("classifies unknown without a session checkpoint", async () => {
+    const { scripted, deps } = createHarness();
+    const promise = requestObservation({ wait: false }, deps);
+    await flush();
+    scripted.stream().push(observation(5, "passed"));
+
+    expect((await promise).correlation).toBe("unknown");
+  });
+
+  it("classifies incomplete evidence when the batch carries no paths", async () => {
+    const { scripted, deps } = createHarness();
+    const promise = requestObservation({ wait: false }, { ...deps, checkpoint: checkpoint() });
+    await flush();
+    scripted
+      .stream()
+      .push(observation(5, "passed", { snapshot: { ...SNAPSHOT, generation: 5, paths: [] } }));
+
+    expect((await promise).correlation).toBe("incomplete");
+  });
+
+  it("classifies no overlap when the batch excludes every session edit", async () => {
+    const { scripted, deps } = createHarness();
+    const promise = requestObservation({ wait: false }, { ...deps, checkpoint: checkpoint() });
+    await flush();
+    scripted.stream().push(
+      observation(5, "passed", {
+        snapshot: { ...SNAPSHOT, generation: 5, paths: ["docs/readme.md"] },
+      }),
+    );
+
+    expect((await promise).correlation).toBe("no-overlap");
+  });
+});
+
 describe("requestObservation observationResult parity", () => {
   it("keeps the pure builder and the use case result shape aligned", async () => {
     const { scripted, deps } = createHarness();
@@ -381,7 +436,10 @@ describe("requestObservation observationResult parity", () => {
     scripted.stream().push(pushed);
 
     const result = await promise;
-    const expected = observationResult(pushed, "snapshot", { waitedMs: 0 });
+    const expected = observationResult(pushed, "snapshot", {
+      waitedMs: 0,
+      correlation: "unknown",
+    });
 
     expect(result).toEqual(expected);
   });

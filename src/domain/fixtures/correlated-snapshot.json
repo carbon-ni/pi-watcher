@@ -1,13 +1,24 @@
 {
-  "instance": { "token": "fz-7f3a", "startedAtEpochMs": 1710000000000 },
+  "instance": {
+    "token": "fz-7f3a",
+    "startedAtEpochMs": 1710000000000
+  },
   "generation": 4,
   "batchId": "b-19",
   "state": "passed",
   "trigger": "src/main.rs",
   "commands": ["make all"],
-  "tasks": [{ "id": "t-1", "name": "test @agent-final", "state": "passed", "durationMs": 42 }],
+  "tasks": [
+    {
+      "id": "t-1",
+      "name": "test @agent-final",
+      "state": "passed",
+      "durationMs": 42
+    }
+  ],
   "pending": 0,
   "freshness": "current",
   "durationMs": 42,
-  "failures": []
+  "failures": [],
+  "paths": ["src/main.rs", "src/lib.rs"]
 }

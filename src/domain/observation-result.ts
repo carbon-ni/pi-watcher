@@ -4,6 +4,7 @@ import type {
   WatcherInstance,
   WatcherTaskOutcome,
 } from "./capabilities.js";
+import type { CorrelationClass } from "./correlation.js";
 import type { WatcherObservation, WatcherObservationSource } from "./observation.js";
 import type { WatcherExecutionState } from "./watcher.js";
 
@@ -72,6 +73,8 @@ export interface WatcherObservationResult {
   waitedMs: number;
   /** Actionable detail for unknown/disconnect outcomes. */
   message: string | null;
+  /** Whether the batch includes this session's edits (evidence of inclusion). */
+  correlation: CorrelationClass;
 }
 
 export interface ObservationResultOptions {
@@ -79,6 +82,7 @@ export interface ObservationResultOptions {
   supersedingGeneration?: number | null;
   message?: string | null;
   maxEvidenceLines?: number;
+  correlation?: CorrelationClass;
 }
 
 /**
@@ -129,6 +133,7 @@ export function observationResult(
     supersedingGeneration: options.supersedingGeneration ?? null,
     waitedMs: options.waitedMs ?? 0,
     message: options.message ?? null,
+    correlation: options.correlation ?? "unknown",
   };
 }
 

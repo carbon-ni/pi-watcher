@@ -1,10 +1,17 @@
 {
   "protocolVersion": "1.1",
   "schemaVersion": 2,
-  "instance": { "token": "fz-7f3a", "startedAtEpochMs": 1710000000000 },
+  "instance": {
+    "token": "fz-7f3a",
+    "startedAtEpochMs": 1710000000000
+  },
   "methods": ["status", "targets", "run", "capabilities", "subscribe", "cancel", "output"],
-  "optionalFields": ["batchId", "pending", "tasks"],
-  "limits": { "outputRetentionBytes": 1048576, "maxResponseBytes": 65536, "maxEvidenceLines": 40 },
+  "optionalFields": ["batchId", "pending", "tasks", "paths"],
+  "limits": {
+    "outputRetentionBytes": 1048576,
+    "maxResponseBytes": 65536,
+    "maxEvidenceLines": 40
+  },
   "features": {
     "atomicAwait": true,
     "subscription": true,

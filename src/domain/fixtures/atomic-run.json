@@ -1,16 +1,27 @@
 {
   "runId": 7,
   "snapshot": {
-    "instance": { "token": "fz-7f3a", "startedAtEpochMs": 1710000000000 },
+    "instance": {
+      "token": "fz-7f3a",
+      "startedAtEpochMs": 1710000000000
+    },
     "generation": 7,
     "batchId": "b-21",
     "state": "passed",
     "trigger": "control:lint",
     "commands": ["make all"],
-    "tasks": [{ "id": "t-2", "name": "lint", "state": "passed", "durationMs": 42 }],
+    "tasks": [
+      {
+        "id": "t-2",
+        "name": "lint",
+        "state": "passed",
+        "durationMs": 42
+      }
+    ],
     "pending": 0,
     "freshness": "current",
     "durationMs": 42,
-    "failures": []
+    "failures": [],
+    "paths": ["src/main.rs"]
   }
 }

@@ -16,6 +16,7 @@ const SNAPSHOT: WatcherCorrelatedSnapshot = {
   freshness: "current",
   durationMs: 42,
   failures: [],
+  paths: [],
 };
 
 const STATUS: WatcherStatus = {

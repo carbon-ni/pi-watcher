@@ -30,6 +30,7 @@ const SNAPSHOT = {
   freshness: "current",
   durationMs: 42,
   failures: [],
+  paths: [],
 };
 
 async function withSocketServer(

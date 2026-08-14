@@ -5,6 +5,11 @@ import {
   type WatcherObserveRequest,
   type WatcherObservationResult,
 } from "../domain/observation-result.js";
+import {
+  classifyCorrelation,
+  type CorrelationClass,
+  type EditCheckpoint,
+} from "../domain/correlation.js";
 import type { WatcherExecutionState } from "../domain/watcher.js";
 import type { ObserverPort } from "./observer.js";
 
@@ -33,6 +38,10 @@ export interface ObserveDeps {
   onObservation?: (observation: WatcherObservation) => void;
   /** Infra-owned transport vs payload classification; never guessed here. */
   classifyError: (error: unknown) => "disconnect" | "unknown";
+  /** Session edit checkpoint for batch correlation (may be null). */
+  checkpoint?: EditCheckpoint | null;
+  /** Trusted project root used to normalize correlation paths. */
+  projectRoot?: string;
   /** Injected clock for deterministic timeout and waitedMs in tests. */
   now?: () => number;
 }
@@ -59,6 +68,18 @@ export async function requestObservation(
     Math.max(1, deadline - now()),
   );
 
+  // Batch correlation is evidence of inclusion, never causation; the session
+  // checkpoint and trusted root come from the Pi layer, the policy is domain.
+  const correlate = (observation: WatcherObservation | null): CorrelationClass =>
+    observation === null
+      ? "unknown"
+      : classifyCorrelation(
+          deps.checkpoint ?? null,
+          observation.snapshot?.instance.token ?? null,
+          observation.snapshot?.paths ?? [],
+          deps.projectRoot ?? "",
+        ).class;
+
   const finish = (
     outcome: ObservationOutcome,
     observation: WatcherObservation | null,
@@ -67,6 +88,7 @@ export async function requestObservation(
     observationResult(observation, outcome, {
       waitedMs: now() - startedAt,
       maxEvidenceLines: request.maxEvidenceLines,
+      correlation: correlate(observation),
       ...options,
     });
 

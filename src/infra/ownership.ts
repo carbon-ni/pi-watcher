@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
+import { isAutomaticOwnerExpired } from "../domain/ownership.js";
 
 interface StoredResponder {
   v: 1;
@@ -34,6 +35,9 @@ export async function readResponder(socketPath: string): Promise<Responder | nul
 
   const automatic = await readStoredResponder(automaticPath(socketPath));
   if (!automatic) return null;
+  // Automatic ownership expires without recent activity (contract §8); the
+  // stale record is left in place and overwritten by the next activity.
+  if (isAutomaticOwnerExpired(automatic.updatedAt, Date.now())) return null;
   return { mode: "automatic", sessionId: automatic.sessionId };
 }
 

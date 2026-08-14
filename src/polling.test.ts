@@ -90,6 +90,8 @@ function createDeps(overrides: Partial<Deps> = {}): Deps {
     recordsAgentActivity,
     recordAutomaticResponder: vi.fn().mockResolvedValue(undefined),
     isSessionDisconnected: vi.fn().mockResolvedValue(false),
+    isHandledFailure: vi.fn<(sessionId: string, key: string) => boolean>(() => false),
+    claimFailureDelivery: vi.fn(async () => true),
     renderWatcherFooter,
     watcherStatusColor,
     formatStatus,
@@ -257,6 +259,34 @@ describe("failure delivery", () => {
     const { ctx, lifecycle, sendMessage } = createHarness({
       queryStatus: vi.fn().mockResolvedValue(failed),
       readResponder: vi.fn().mockResolvedValue({ mode: "pinned", sessionId: "session-2" }),
+    });
+
+    await lifecycle.sessionStart({} as never, ctx as never);
+    await flush();
+
+    expect(sendMessage).not.toHaveBeenCalled();
+  });
+
+  it("does not deliver when another session already claimed the failure", async () => {
+    const failed: WatcherStatus = { ...STATUS, state: "failed", failures: ["boom"] };
+    const { ctx, lifecycle, sendMessage } = createHarness({
+      queryStatus: vi.fn().mockResolvedValue(failed),
+      readResponder: vi.fn().mockResolvedValue({ mode: "automatic", sessionId: "session-1" }),
+      claimFailureDelivery: vi.fn(async () => false),
+    });
+
+    await lifecycle.sessionStart({} as never, ctx as never);
+    await flush();
+
+    expect(sendMessage).not.toHaveBeenCalled();
+  });
+
+  it("does not deliver a failure this session already observed through its tools", async () => {
+    const failed: WatcherStatus = { ...STATUS, state: "failed", failures: ["boom"] };
+    const { ctx, lifecycle, sendMessage } = createHarness({
+      queryStatus: vi.fn().mockResolvedValue(failed),
+      readResponder: vi.fn().mockResolvedValue({ mode: "automatic", sessionId: "session-1" }),
+      isHandledFailure: vi.fn<(sessionId: string, key: string) => boolean>(() => true),
     });
 
     await lifecycle.sessionStart({} as never, ctx as never);

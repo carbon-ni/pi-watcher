@@ -9,6 +9,7 @@ import type { WatcherObservationResult } from "./domain/observation-result.js";
 import type { WatcherObservation } from "./domain/observation.js";
 import type { WatcherOutputResult } from "./domain/output.js";
 import type { WatcherCancelResult } from "./domain/cancel.js";
+import { failureEngagementKeyParts } from "./domain/failure-notifier.js";
 import type { WatcherStatus, WatcherTarget } from "./domain/watcher.js";
 
 const CONFIG = { socketPath: "/tmp/funzzy.sock", pollIntervalMs: 1_000 };
@@ -158,6 +159,7 @@ function createDeps(overrides: Record<string, unknown> = {}) {
     cancelGeneration: vi
       .fn()
       .mockResolvedValue({ outcome: "cancelled", generation: 7, message: null }),
+    recordHandledFailure: vi.fn(),
     ...overrides,
   };
 }
@@ -536,6 +538,92 @@ describe("watcher_output", () => {
 
     const tool = registeredTool(tools, "watcher_output");
     expect(tool!.description).toMatch(/not a status call/);
+  });
+});
+
+describe("handled failure recording", () => {
+  it("records a failed verification so the follow-up is not redundant", async () => {
+    const { pi, tools } = createPi();
+    const recordHandledFailure = vi.fn();
+    const verifyRequest = vi.fn().mockResolvedValue({
+      reason: "failed",
+      target: "lint",
+      generation: 7,
+      instance: null,
+      failures: ["boom"],
+      fingerprint: "abc123",
+      evidenceTruncated: false,
+    });
+    registerTools(pi as never, createDeps({ verifyRequest, recordHandledFailure }));
+
+    await expect(
+      runTool(registeredTool(tools, "watcher_verify"), { target: "lint" }, trustedCtx()),
+    ).rejects.toThrow(/FAIL/);
+
+    expect(recordHandledFailure).toHaveBeenCalledWith(
+      "session-1",
+      failureEngagementKeyParts(null, 7),
+    );
+  });
+
+  it("records the instance-scoped engagement key from a failed verification", async () => {
+    const { pi, tools } = createPi();
+    const recordHandledFailure = vi.fn();
+    const verifyRequest = vi.fn().mockResolvedValue({
+      reason: "failed",
+      target: "lint",
+      generation: 7,
+      instance: { token: "fz-7f3a", startedAtEpochMs: 0 },
+      failures: ["boom"],
+      fingerprint: "abc123",
+      evidenceTruncated: false,
+    });
+    registerTools(pi as never, createDeps({ verifyRequest, recordHandledFailure }));
+
+    await expect(
+      runTool(registeredTool(tools, "watcher_verify"), {}, trustedCtx()),
+    ).rejects.toThrow(/FAIL/);
+
+    expect(recordHandledFailure).toHaveBeenCalledWith("session-1", "fz-7f3a:7");
+  });
+
+  it("does not record passed or unknown verifications", async () => {
+    const { pi, tools } = createPi();
+    const recordHandledFailure = vi.fn();
+    registerTools(pi as never, createDeps({ recordHandledFailure }));
+
+    await runTool(registeredTool(tools, "watcher_verify"), {}, trustedCtx());
+
+    expect(recordHandledFailure).not.toHaveBeenCalled();
+  });
+
+  it("records a failed terminal observation so the follow-up is not redundant", async () => {
+    const { pi, tools } = createPi();
+    const recordHandledFailure = vi.fn();
+    const requestObservation = vi.fn().mockResolvedValue({
+      outcome: "terminal",
+      instance: { token: "fz-7f3a", startedAtEpochMs: 0 },
+      generation: 7,
+      state: "failed",
+      tasks: [],
+      failures: ["boom"],
+      truncated: false,
+    });
+    registerTools(pi as never, createDeps({ requestObservation, recordHandledFailure }));
+
+    await runTool(registeredTool(tools, "watcher_observe"), {}, trustedCtx());
+
+    expect(recordHandledFailure).toHaveBeenCalledWith("session-1", "fz-7f3a:7");
+  });
+
+  it("does not record a passed observation or non-terminal outcomes", async () => {
+    const { pi, tools } = createPi();
+    const recordHandledFailure = vi.fn();
+    registerTools(pi as never, createDeps({ recordHandledFailure }));
+
+    await runTool(registeredTool(tools, "watcher_observe"), {}, trustedCtx());
+
+    expect(recordHandledFailure).not.toHaveBeenCalled();
   });
 });
 

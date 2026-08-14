@@ -20,6 +20,7 @@ import { CapabilityCache, loadCapabilities } from "./infra/capabilities.js";
 import { createPollingPort, createSubscriptionPort } from "./infra/observer.js";
 import { classifyObservationError } from "./infra/observe.js";
 import { createCancelPort } from "./infra/cancel.js";
+import { claimFailureDelivery } from "./infra/delivery.js";
 import { createAtomicVerifyPort, createLegacyVerifyPort } from "./infra/verify.js";
 import { readConfig } from "./infra/config.js";
 import { worktreeFingerprint } from "./infra/fingerprint.js";
@@ -39,6 +40,30 @@ export default function funzzyStatus(pi: ExtensionAPI) {
   const requireTrustedConfig = createRequireTrustedConfig(readConfig);
   const capabilityCache = new CapabilityCache();
 
+  // Bounded per-session registry of failure engagements recorded by the tools,
+  // so a follow-up never interrupts a session that already saw the failure
+  // through watcher_observe or watcher_verify (contract §8).
+  const HANDLED_FAILURE_TTL_MS = 10 * 60_000;
+  const HANDLED_FAILURE_MAX = 20;
+  const handledFailures = new Map<string, Array<{ key: string; at: number }>>();
+  const recordHandledFailure = (sessionId: string, key: string): void => {
+    const now = Date.now();
+    const entries = (handledFailures.get(sessionId) ?? []).filter(
+      (entry) => now - entry.at < HANDLED_FAILURE_TTL_MS,
+    );
+    entries.push({ key, at: now });
+    if (entries.length > HANDLED_FAILURE_MAX) {
+      entries.splice(0, entries.length - HANDLED_FAILURE_MAX);
+    }
+    handledFailures.set(sessionId, entries);
+  };
+  const isHandledFailure = (sessionId: string, key: string): boolean => {
+    const now = Date.now();
+    return (handledFailures.get(sessionId) ?? []).some(
+      (entry) => entry.key === key && now - entry.at < HANDLED_FAILURE_TTL_MS,
+    );
+  };
+
   const lifecycle = createPollingLifecycle(pi, {
     readConfig,
     createFailureNotifier,
@@ -51,6 +76,8 @@ export default function funzzyStatus(pi: ExtensionAPI) {
     recordsAgentActivity,
     recordAutomaticResponder,
     isSessionDisconnected,
+    isHandledFailure,
+    claimFailureDelivery,
     renderWatcherFooter,
     watcherStatusColor,
     formatStatus,
@@ -90,6 +117,7 @@ export default function funzzyStatus(pi: ExtensionAPI) {
     },
     classifyObservationError,
     requestObservation,
+    recordHandledFailure,
     requestOutput: async (socketPath, request, signal) => {
       const profile = await loadCapabilities(socketPath, capabilityCache);
       if (!profile.features.outputRetrieval) {

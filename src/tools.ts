@@ -19,6 +19,7 @@ import {
   cancellationReport,
   type WatcherCancelResult,
 } from "./domain/cancel.js";
+import { failureEngagementKeyParts } from "./domain/failure-notifier.js";
 import type { RequireTrustedConfig } from "./trusted-config.js";
 import type { Exec } from "./infra/fingerprint.js";
 import type { FunzzyConfig } from "./infra/config.js";
@@ -64,6 +65,8 @@ export interface ToolDeps {
     generation: number,
     timeoutMs: number,
   ) => Promise<WatcherCancelResult>;
+  /** Record that this session already saw a failed generation (no follow-up). */
+  recordHandledFailure: (sessionId: string, key: string) => void;
 }
 
 export function registerTools(pi: ExtensionAPI, deps: ToolDeps): void {
@@ -209,6 +212,13 @@ export function registerTools(pi: ExtensionAPI, deps: ToolDeps): void {
           },
         },
       );
+
+      if (result.state === "failed" && result.generation !== null) {
+        deps.recordHandledFailure(
+          ctx.sessionManager.getSessionId(),
+          failureEngagementKeyParts(result.instance?.token ?? null, result.generation),
+        );
+      }
 
       return {
         content: [{ type: "text", text: formatObservation(result) }],
@@ -383,6 +393,13 @@ export function registerTools(pi: ExtensionAPI, deps: ToolDeps): void {
         );
       } finally {
         if (abortListener !== null) signal?.removeEventListener("abort", abortListener);
+      }
+
+      if (verification.reason === "failed" && verification.generation !== null) {
+        deps.recordHandledFailure(
+          ctx.sessionManager.getSessionId(),
+          failureEngagementKeyParts(verification.instance?.token ?? null, verification.generation),
+        );
       }
 
       if (verification.reason !== "passed") {

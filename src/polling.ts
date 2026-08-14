@@ -24,6 +24,10 @@ export interface PollingDeps {
   recordsAgentActivity: (toolName: string) => boolean;
   recordAutomaticResponder: (socketPath: string, sessionId: string) => Promise<void>;
   isSessionDisconnected: (socketPath: string, sessionId: string) => Promise<boolean>;
+  /** Whether this session already observed/verified the failure key. */
+  isHandledFailure: (sessionId: string, key: string) => boolean;
+  /** Atomic cross-session at-most-once delivery claim. */
+  claimFailureDelivery: (socketPath: string, key: string) => Promise<boolean>;
   renderWatcherFooter: (status: WatcherStatus) => string;
   watcherStatusColor: (state: WatcherExecutionState) => WatcherStatusColor;
   formatStatus: (status: WatcherStatus) => string;
@@ -62,17 +66,25 @@ export function createPollingLifecycle(pi: ExtensionAPI, deps: PollingDeps): Pol
 
   const startWatching = async (config: FunzzyConfig, ctx: ExtensionContext): Promise<void> => {
     activitySocketPath = config.socketPath;
-    notifyFailure = deps.createFailureNotifier(ctx.sessionManager.getSessionId(), (status) => {
-      pi.sendMessage(
-        {
-          customType: "funzzy-failure",
-          content: `Funzzy failed while this agent was idle. Investigate and fix the failure.\n${deps.formatStatus(status)}`,
-          display: true,
-          details: status,
-        },
-        { deliverAs: "followUp", triggerTurn: true },
-      );
-    });
+    const sessionId = ctx.sessionManager.getSessionId();
+    notifyFailure = deps.createFailureNotifier(
+      sessionId,
+      (status) => {
+        pi.sendMessage(
+          {
+            customType: "funzzy-failure",
+            content: `Funzzy failed while this agent was idle. Investigate and fix the failure.\n${deps.formatStatus(status)}\nnext: watcher_output generation=${status.generation}`,
+            display: true,
+            details: status,
+          },
+          { deliverAs: "followUp", triggerTurn: true },
+        );
+      },
+      {
+        isHandled: (key) => deps.isHandledFailure(sessionId, key),
+        claimDelivery: (key) => deps.claimFailureDelivery(config.socketPath, key),
+      },
+    );
 
     // Capability-gated transport (contract §8): subscription when the watcher
     // supports it, legacy polling otherwise. Polled observations are marked
@@ -96,7 +108,7 @@ export function createPollingLifecycle(pi: ExtensionAPI, deps: PollingDeps): Pol
           );
           void deps.readResponder(config.socketPath).then((responder) => {
             if (observer !== current) return;
-            notifyFailure?.(observation.status, ctx.isIdle(), responder?.sessionId ?? null);
+            void notifyFailure?.(observation, ctx.isIdle(), responder?.sessionId ?? null);
           });
         },
         onUnavailable: () => {

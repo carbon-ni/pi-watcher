@@ -1,7 +1,7 @@
 ---
 id: TASK-0007
 title: Propagate Pi tool abort to exact generation cancellation
-status: todo
+status: done
 depends_on: [TASK-0004]
 priority: high
 tags: [typescript, tools, application, cancellation, lifecycle, tdd]

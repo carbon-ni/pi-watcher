@@ -1,7 +1,7 @@
 ---
 id: TASK-0008
 title: Harden multi-session failure delivery and ownership
-status: todo
+status: done
 depends_on: [TASK-0002, TASK-0003]
 priority: normal
 tags: [typescript, domain, sessions, notifications, ownership, tdd]

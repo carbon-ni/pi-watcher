@@ -99,7 +99,13 @@ describe.skipIf(!binaryAvailable)("real watcher binary (legacy fallback)", () =>
       git(["commit", "-qm", "base"]);
 
       let fzzStderr = "";
+      let fzzSpawnError: string | null = null;
       fzz = spawn(BIN, ["-c", ".watch.yaml"], { cwd: dir, stdio: ["ignore", "ignore", "pipe"] });
+      fzz.on("error", (error) => {
+        // Never let a spawn failure become an uncaught "error" event: that
+        // would kill the vitest worker and abort the whole coverage run.
+        fzzSpawnError = error.message;
+      });
       fzz.stderr?.on("data", (chunk: Buffer) => {
         fzzStderr += chunk.toString("utf8");
       });
@@ -110,6 +116,9 @@ describe.skipIf(!binaryAvailable)("real watcher binary (legacy fallback)", () =>
         await new Promise((resolve) => setTimeout(resolve, 100));
       }
       expect(existsSync(socketPath)).toBe(true);
+      if (fzzSpawnError !== null) {
+        throw new Error(`fzz failed to spawn: ${fzzSpawnError}`);
+      }
       if (fzz.exitCode !== null) {
         throw new Error(`fzz exited early (${fzz.exitCode}): ${fzzStderr}`);
       }

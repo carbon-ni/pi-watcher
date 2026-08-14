@@ -157,11 +157,11 @@ describe.skipIf(!binaryAvailable)("real watcher binary (legacy fallback)", () =>
       // Output retrieval is unavailable on the real server today.
       await expect(run("watcher_output", { generation: 1 })).rejects.toThrow();
 
-      // Cancel has no method on the real server today.
+      // Cancel is a compare-and-cancel: an idle generation is a safe no-op.
       const cancel = (await run("watcher_cancel", { generation: 1 })) as {
         content: Array<{ text: string }>;
       };
-      expect(cancel.content[0]!.text).toContain("unknown");
+      expect(cancel.content[0]!.text).toContain("not-running");
 
       // The lifecycle subscribes only on negotiated profiles; the legacy
       // profile keeps polling, so the status bar still renders.

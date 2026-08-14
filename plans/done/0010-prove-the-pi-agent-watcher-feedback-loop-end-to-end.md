@@ -1,7 +1,7 @@
 ---
 id: TASK-0010
 title: Prove the Pi agent watcher feedback loop end to end
-status: todo
+status: done
 depends_on: [TASK-0003, TASK-0004, TASK-0005, TASK-0006, TASK-0007, TASK-0008, TASK-0009]
 priority: high
 tags: [integration-tests, axi, pi, reliability, performance]

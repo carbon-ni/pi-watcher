@@ -160,16 +160,17 @@ class FakeWatcherServer {
     task: string | null,
     options: Partial<Record<string, unknown>> = {},
   ): void {
+    const stream = {
+      content: "",
+      lines: 0,
+      retainedBytes: 0,
+      observedBytes: 0,
+      truncated: false,
+      ...options,
+    };
     this.outputByKey.set(`${generation}:${task ?? ""}`, {
       generation,
-      task,
-      stream: "stdout",
-      observedBytes: 0,
-      retainedBytes: 0,
-      evicted: false,
-      truncated: false,
-      lines: [],
-      ...options,
+      tasks: task === null ? [] : [{ id: task, stdout: stream, stderr: null }],
     });
   }
 
@@ -357,19 +358,14 @@ class FakeWatcherServer {
         const scripted = this.outputByKey.get(
           `${generation}:${typeof task === "string" ? task : ""}`,
         );
-        this.respond(
-          socket,
-          scripted ?? {
-            generation,
-            task,
-            stream: "stdout",
-            observedBytes: 0,
-            retainedBytes: 0,
-            evicted: true,
-            truncated: false,
-            lines: [],
-          },
-        );
+        if (scripted !== undefined) {
+          this.respond(socket, scripted);
+        } else {
+          this.respond(socket, undefined, {
+            code: -32000,
+            message: `no retained output for generation ${generation}`,
+          });
+        }
         break;
       }
       default:
@@ -745,18 +741,33 @@ describe("agent watcher feedback loop (end to end)", () => {
       expect(failed.content[0]!.text).toContain("FAIL gen=6");
 
       // exact task output retrieval (typed details, no log parsing)
-      h.server.scriptOutput(6, null, {
-        lines: ["boom: assertion failed", "at src/main.ts:1"],
+      h.server.scriptOutput(6, "run integration", {
+        content: "boom: assertion failed\nat src/main.ts:1\n",
+        lines: 2,
         observedBytes: 8192,
         retainedBytes: 4096,
         truncated: true,
       });
-      const output = await runTool(h.tool("watcher_output"), { generation: 6, tail: 10 }, h.ctx);
+      const output = await runTool(
+        h.tool("watcher_output"),
+        { generation: 6, task: "run integration", tail: 10 },
+        h.ctx,
+      );
       expect(output.details).toMatchObject({
         generation: 6,
-        task: null,
-        lines: ["boom: assertion failed", "at src/main.ts:1"],
-        truncated: true,
+        tasks: [
+          {
+            id: "run integration",
+            stdout: {
+              content: "boom: assertion failed\nat src/main.ts:1\n",
+              lines: 2,
+              observedBytes: 8192,
+              retainedBytes: 4096,
+              truncated: true,
+            },
+            stderr: null,
+          },
+        ],
       });
 
       // fix + fresh recovery
@@ -1005,12 +1016,12 @@ describe("agent watcher feedback loop (end to end)", () => {
       }
     });
 
-    it("evicted output is reported explicitly", async () => {
+    it("reports no retained output as an actionable error", async () => {
       const h = await createHarness();
       try {
-        const output = await runTool(h.tool("watcher_output"), { generation: 4 }, h.ctx);
-        expect(output.details).toMatchObject({ generation: 4, evicted: true });
-        expect(output.content[0]!.text).toContain("evicted");
+        await expect(runTool(h.tool("watcher_output"), { generation: 4 }, h.ctx)).rejects.toThrow(
+          /no retained output/,
+        );
       } finally {
         await h.cleanup();
       }

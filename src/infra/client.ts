@@ -12,7 +12,6 @@ import {
 } from "../domain/capabilities.js";
 import { decodeAtomicRunResult, type AtomicRunResult } from "../domain/verification.js";
 import {
-  boundOutputLines,
   decodeWatcherOutput,
   WatcherOutputNotFoundError,
   WatcherOutputTaskNotFoundError,
@@ -294,7 +293,7 @@ export async function requestOutput(
       },
       timeoutMs,
       true,
-      (value) => boundOutputLines(decodeWatcherOutput(value), request),
+      (value) => decodeWatcherOutput(value),
       signal,
       "Funzzy output retrieval was cancelled",
     );

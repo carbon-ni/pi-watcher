@@ -10,6 +10,7 @@ import type { Responder } from "./infra/ownership.js";
 import type { WatcherExecutionState, WatcherStatus } from "./domain/watcher.js";
 import type { WatcherStatusColor } from "./domain/status-presentation.js";
 import { observationFooterSuffix } from "./domain/observation.js";
+import { firstFailedTask } from "./domain/failure-notifier.js";
 import {
   normalizeEditPaths,
   recordEditCheckpoint,
@@ -86,7 +87,7 @@ export function createPollingLifecycle(pi: ExtensionAPI, deps: PollingDeps): Pol
         pi.sendMessage(
           {
             customType: "funzzy-failure",
-            content: `Funzzy failed while this agent was idle. Investigate and fix the failure.\n${deps.formatStatus(status)}\nnext: watcher_output generation=${status.generation}`,
+            content: `Funzzy failed while this agent was idle. Investigate and fix the failure.\n${deps.formatStatus(status)}\nnext: watcher_output generation=${status.generation}${taskHint(status.failures)}`,
             display: true,
             details: status,
           },
@@ -210,6 +211,15 @@ export function createPollingLifecycle(pi: ExtensionAPI, deps: PollingDeps): Pol
       await beginSession(ctx);
     },
   };
+}
+
+/**
+ * Append the failed task name to the retrieval hint so the follow-up agent
+ * can narrow watcher_output without guessing task names.
+ */
+function taskHint(failures: string[]): string {
+  const task = firstFailedTask(failures);
+  return task === null ? "" : ` task='${task}'`;
 }
 
 /**

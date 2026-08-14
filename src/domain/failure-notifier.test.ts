@@ -8,6 +8,7 @@ import {
   failureDeliveryKeyParts,
   failureEngagementKey,
   failureEngagementKeyParts,
+  firstFailedTask,
 } from "./failure-notifier.js";
 
 const SNAPSHOT: WatcherCorrelatedSnapshot = {
@@ -196,6 +197,21 @@ describe("createFailureNotifier", () => {
     );
 
     expect(sendFailure).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("firstFailedTask", () => {
+  it("extracts the task name from a command failure entry", () => {
+    expect(
+      firstFailedTask([
+        "run integration @agent-final: Command cargo test has failed with exit status: 101",
+      ]),
+    ).toBe("run integration @agent-final");
+  });
+
+  it("returns null when no failure entry carries a task separator", () => {
+    expect(firstFailedTask([])).toBeNull();
+    expect(firstFailedTask(["raw failure without a task prefix"])).toBeNull();
   });
 });
 

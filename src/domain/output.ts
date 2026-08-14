@@ -10,20 +10,17 @@ export { WatcherProtocolError } from "./protocol.js";
 /**
  * Output vocabulary (contract §6): one bounded retrieval of retained task
  * output for an exact generation, optionally narrowed by task and stream.
- * Pure domain: decoding validates every field and fails closed, the client
- * tail/full bounds are decided here, and presentation preserves line
- * boundaries without ANSI or terminal-width dependence.
+ * Pure domain: decoding validates every field and fails closed; the server
+ * bounds content (tail or full, default retained tail) and reports
+ * observed/retained bytes and truncation per stream.
  *
  * Non-UTF8 policy: raw bytes are converted to JSON strings server-side
- * (lossy); a non-string line here is a protocol violation and fails closed.
+ * (lossy); a non-string here is a protocol violation and fails closed.
  */
 
 export type WatcherOutputStream = "stdout" | "stderr";
 
 export const OUTPUT_STREAMS: readonly WatcherOutputStream[] = ["stdout", "stderr"] as const;
-
-/** Default tail when neither `tail` nor `full` is given. */
-export const DEFAULT_OUTPUT_TAIL = 40;
 
 export interface WatcherOutputRequest {
   generation: number;
@@ -31,27 +28,37 @@ export interface WatcherOutputRequest {
   task?: string | null;
   /** null = both streams; a value narrows to stdout or stderr. */
   stream?: WatcherOutputStream | null;
-  /** Last N lines; default 40; ignored when full is set. */
+  /** Last N lines per stream; default retained tail; ignored when full is set. */
   tail?: number;
   /** Return every retained line (still transport-bounded by the server). */
   full?: boolean;
 }
 
-export interface WatcherOutputResult {
-  /** Exact selected identity echoed by the server. */
-  generation: number;
-  task: string | null;
-  stream: WatcherOutputStream | null;
-  /** Bytes the server observed for the selected identity. */
-  observedBytes: number;
+export interface WatcherStreamOutput {
+  /** Retained lines the server delivered (already tail/full bounded). */
+  content: string;
+  /** Number of content lines, as counted server-side. */
+  lines: number;
   /** Bytes still retained when the server answered (eviction drops these). */
   retainedBytes: number;
-  /** True when retained output was dropped before retrieval. */
-  evicted: boolean;
-  /** Lines delivered by the server, before client-side tail bounds. */
-  lines: string[];
-  /** True when the server or the client tail/full bounds cut lines. */
+  /** Bytes the server observed for the stream. */
+  observedBytes: number;
+  /** True when the server tail/full bound or retention cut the stream. */
   truncated: boolean;
+}
+
+export interface WatcherTaskOutput {
+  id: string;
+  /** null when the request narrowed to the other stream. */
+  stdout: WatcherStreamOutput | null;
+  stderr: WatcherStreamOutput | null;
+}
+
+export interface WatcherOutputResult {
+  /** Exact selected generation echoed by the server. */
+  generation: number;
+  /** One entry per retained task (whole-generation retrieval) or one selected task. */
+  tasks: WatcherTaskOutput[];
 }
 
 /**
@@ -59,70 +66,57 @@ export interface WatcherOutputResult {
  *
  * Wire shape is the agreed additive contract
  * (`src/domain/fixtures/output.json`, mirrored by Rust protocol tests):
- * generation/task/stream identity plus observed/retained bytes, eviction,
- * server-side truncation, and the retained lines.
+ * `{ generation, tasks: [{ id, stdout: StreamOutput|null, stderr: StreamOutput|null }] }`
+ * where `StreamOutput` is `{ content, lines, retainedBytes, observedBytes, truncated }`.
  */
 export function decodeWatcherOutput(value: unknown): WatcherOutputResult {
   const object = expectObject(value, "output response");
 
   const generation = readRequiredNumber(object, "generation", "output response");
-  const task = readNullableString(object, "task", "output response");
-  const stream = readOptionalStream(object);
-  const observedBytes = readRequiredNumber(object, "observedBytes", "output response");
-  const retainedBytes = readRequiredNumber(object, "retainedBytes", "output response");
-  const evicted = readRequiredBoolean(object, "evicted", "output response");
-  const truncated = readRequiredBoolean(object, "truncated", "output response");
-  const lines = readLineArray(object);
-
-  return {
-    generation,
-    task,
-    stream,
-    observedBytes,
-    retainedBytes,
-    evicted,
-    truncated,
-    lines,
-  };
-}
-
-/**
- * Apply the client-side tail/full bounds deterministically. The server may
- * already have truncated (transport or retention caps); that flag is kept,
- * and cutting here marks truncation as well.
- */
-export function boundOutputLines(
-  result: WatcherOutputResult,
-  request: WatcherOutputRequest,
-): WatcherOutputResult {
-  if (request.full) return result;
-
-  const tail = request.tail ?? DEFAULT_OUTPUT_TAIL;
-  if (tail < 0 || !Number.isInteger(tail)) {
-    throw new WatcherProtocolError(`Funzzy output request: "tail" must be a non-negative integer`);
+  const tasksValue = object["tasks"];
+  if (!Array.isArray(tasksValue)) {
+    throw new WatcherProtocolError(
+      `Funzzy output response: "tasks" must be an array, got ${describeValue(tasksValue)}`,
+    );
   }
-  if (tail === 0) {
-    return { ...result, lines: [], truncated: true };
-  }
-  if (result.lines.length <= tail) return result;
+  const tasks = tasksValue.map((entry, index) => {
+    const task = expectObject(entry, `output task at index ${index}`);
+    const id = readRequiredString(task, "id", `output task at index ${index}`);
+    const stdout = readOptionalStreamOutput(task, "stdout", `output task at index ${index}`);
+    const stderr = readOptionalStreamOutput(task, "stderr", `output task at index ${index}`);
+    return { id, stdout, stderr };
+  });
 
-  return {
-    ...result,
-    lines: result.lines.slice(-tail),
-    truncated: true,
-  };
+  return { generation, tasks };
 }
 
 /** Compact content projection used by tool content. */
 export function formatWatcherOutput(result: WatcherOutputResult): string {
-  const identity = `gen=${result.generation} task=${result.task ?? "all"} stream=${
-    result.stream ?? "all"
-  }`;
-  const bytes = ` retained=${result.retainedBytes} observed=${result.observedBytes}`;
-  const flags = `${result.evicted ? " evicted" : ""}${result.truncated ? " truncated" : ""}`;
-  const header = `OUTPUT ${identity}${bytes}${flags}`;
-  if (result.lines.length === 0) return header;
-  return `${header}\n${result.lines.map((line) => `  ${line}`).join("\n")}`;
+  if (result.tasks.length === 0) {
+    return `OUTPUT gen=${result.generation} tasks=0`;
+  }
+
+  const blocks: string[] = [];
+  for (const task of result.tasks) {
+    const streams: Array<[WatcherOutputStream, WatcherStreamOutput]> = [];
+    if (task.stdout !== null) streams.push(["stdout", task.stdout]);
+    if (task.stderr !== null) streams.push(["stderr", task.stderr]);
+    for (const [stream, output] of streams) {
+      const flags = output.truncated ? " truncated" : "";
+      const header = `OUTPUT gen=${result.generation} task=${task.id} stream=${stream} retained=${output.retainedBytes} observed=${output.observedBytes}${flags}`;
+      if (output.content === "") {
+        blocks.push(header);
+        continue;
+      }
+      const indented = output.content
+        .replace(/\n$/, "")
+        .split("\n")
+        .map((line) => `  ${line}`)
+        .join("\n");
+      blocks.push(`${header}\n${indented}`);
+    }
+  }
+  return blocks.join("\n");
 }
 
 /** Raised when the watcher cannot produce output for a generation. */
@@ -152,33 +146,33 @@ export class WatcherOutputUnavailableError extends Error {
   }
 }
 
-function readNullableString(
-  object: Record<string, unknown>,
-  field: string,
-  what: string,
-): string | null {
+function readRequiredString(object: Record<string, unknown>, field: string, what: string): string {
   if (!(field in object)) {
     throw new WatcherProtocolError(`Funzzy ${what}: "${field}" is required`);
   }
   const value = object[field];
-  if (value === null) return null;
   if (typeof value !== "string") {
     throw new WatcherProtocolError(
-      `Funzzy ${what}: "${field}" must be a string or null, got ${describeValue(value)}`,
+      `Funzzy ${what}: "${field}" must be a string, got ${describeValue(value)}`,
     );
   }
   return value;
 }
 
-function readOptionalStream(object: Record<string, unknown>): WatcherOutputStream | null {
-  const value = object["stream"];
+function readOptionalStreamOutput(
+  object: Record<string, unknown>,
+  field: string,
+  what: string,
+): WatcherStreamOutput | null {
+  const value = object[field];
   if (value === null || value === undefined) return null;
-  if (typeof value === "string" && OUTPUT_STREAMS.includes(value as WatcherOutputStream)) {
-    return value as WatcherOutputStream;
-  }
-  throw new WatcherProtocolError(
-    `Funzzy output response: "stream" must be one of ${OUTPUT_STREAMS.join(", ")} or null, got ${describeValue(value)}`,
-  );
+  const stream = expectObject(value, `${what} "${field}"`);
+  const content = readRequiredString(stream, "content", `${what} "${field}"`);
+  const lines = readRequiredNumber(stream, "lines", `${what} "${field}"`);
+  const retainedBytes = readRequiredNumber(stream, "retainedBytes", `${what} "${field}"`);
+  const observedBytes = readRequiredNumber(stream, "observedBytes", `${what} "${field}"`);
+  const truncated = readRequiredBoolean(stream, "truncated", `${what} "${field}"`);
+  return { content, lines, retainedBytes, observedBytes, truncated };
 }
 
 function readRequiredBoolean(
@@ -196,27 +190,4 @@ function readRequiredBoolean(
     );
   }
   return value;
-}
-
-function readLineArray(object: Record<string, unknown>): string[] {
-  const field = "lines";
-  if (!(field in object)) {
-    throw new WatcherProtocolError(`Funzzy output response: "${field}" is required`);
-  }
-  const value = object[field];
-  if (!Array.isArray(value)) {
-    throw new WatcherProtocolError(
-      `Funzzy output response: "${field}" must be an array of strings, got ${describeValue(value)}`,
-    );
-  }
-  const lines: string[] = [];
-  for (const [index, entry] of value.entries()) {
-    if (typeof entry !== "string") {
-      throw new WatcherProtocolError(
-        `Funzzy output response: line at index ${index} must be a string, got ${describeValue(entry)}`,
-      );
-    }
-    lines.push(entry);
-  }
-  return lines;
 }

@@ -82,13 +82,19 @@ const OBSERVE_RESULT: WatcherObservationResult = {
 
 const OUTPUT_RESULT: WatcherOutputResult = {
   generation: 7,
-  task: "lint",
-  stream: "stdout",
-  observedBytes: 8192,
-  retainedBytes: 4096,
-  evicted: false,
-  truncated: false,
-  lines: ["line one", "line two"],
+  tasks: [
+    {
+      id: "lint",
+      stdout: {
+        content: "line one\nline two\n",
+        lines: 2,
+        retainedBytes: 4096,
+        observedBytes: 8192,
+        truncated: false,
+      },
+      stderr: null,
+    },
+  ],
 };
 
 type RegisteredToolCapture = {
@@ -516,11 +522,35 @@ describe("watcher_output", () => {
     );
   });
 
-  it("renders whole-generation identity as task=all stream=all", async () => {
+  it("renders every retained task for whole-generation retrieval", async () => {
     const { pi, tools } = createPi();
-    const requestOutput = vi
-      .fn()
-      .mockResolvedValue({ ...OUTPUT_RESULT, task: null, stream: null, lines: [] });
+    const requestOutput = vi.fn().mockResolvedValue({
+      generation: 7,
+      tasks: [
+        {
+          id: "lint",
+          stdout: {
+            content: "ok\n",
+            lines: 1,
+            retainedBytes: 3,
+            observedBytes: 3,
+            truncated: false,
+          },
+          stderr: null,
+        },
+        {
+          id: "test",
+          stdout: null,
+          stderr: {
+            content: "boom\n",
+            lines: 1,
+            retainedBytes: 5,
+            observedBytes: 5,
+            truncated: true,
+          },
+        },
+      ],
+    });
     registerTools(pi as never, createDeps({ requestOutput }));
 
     const result = await runTool(
@@ -529,16 +559,22 @@ describe("watcher_output", () => {
       trustedCtx(),
     );
 
-    expect(result.content[0]!.text).toBe(
-      "OUTPUT gen=7 task=all stream=all retained=4096 observed=8192",
-    );
+    expect(result.content[0]!.text).toContain("task=lint stream=stdout");
+    expect(result.content[0]!.text).toContain("task=test stream=stderr");
+    expect(result.content[0]!.text).toContain("truncated");
   });
 
-  it("labels eviction and truncation in the text", async () => {
+  it("labels truncation in the text", async () => {
     const { pi, tools } = createPi();
-    const requestOutput = vi
-      .fn()
-      .mockResolvedValue({ ...OUTPUT_RESULT, evicted: true, retainedBytes: 0, lines: [] });
+    const requestOutput = vi.fn().mockResolvedValue({
+      ...OUTPUT_RESULT,
+      tasks: [
+        {
+          ...OUTPUT_RESULT.tasks[0]!,
+          stdout: { ...OUTPUT_RESULT.tasks[0]!.stdout!, truncated: true, content: "" },
+        },
+      ],
+    });
     registerTools(pi as never, createDeps({ requestOutput }));
 
     const result = await runTool(
@@ -547,7 +583,7 @@ describe("watcher_output", () => {
       trustedCtx(),
     );
 
-    expect(result.content[0]!.text).toContain(" evicted");
+    expect(result.content[0]!.text).toContain(" truncated");
   });
 
   it("propagates actionable retrieval errors", async () => {

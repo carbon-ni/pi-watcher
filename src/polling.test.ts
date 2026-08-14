@@ -258,6 +258,28 @@ describe("failure delivery", () => {
     expect(sendMessage).toHaveBeenCalledTimes(1);
   });
 
+  it("names the failed task in the watcher_output retrieval hint", async () => {
+    const failed: WatcherStatus = {
+      ...STATUS,
+      state: "failed",
+      failures: [
+        "run integration @agent-final: Command cargo test has failed with exit status: 101",
+      ],
+    };
+    const { ctx, lifecycle, sendMessage } = createHarness({
+      queryStatus: vi.fn().mockResolvedValue(failed),
+      readResponder: vi.fn().mockResolvedValue({ mode: "automatic", sessionId: "session-1" }),
+    });
+
+    await lifecycle.sessionStart({} as never, ctx as never);
+    await flush();
+
+    const message = sendMessage.mock.calls[0]![0] as { content?: string };
+    expect(message.content).toContain(
+      "next: watcher_output generation=7 task='run integration @agent-final'",
+    );
+  });
+
   it("does not deliver when the responder belongs to another session", async () => {
     const failed: WatcherStatus = { ...STATUS, state: "failed", failures: ["boom"] };
     const { ctx, lifecycle, sendMessage } = createHarness({

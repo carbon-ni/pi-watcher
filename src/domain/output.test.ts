@@ -2,13 +2,8 @@ import { describe, expect, it } from "vitest";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 
-import {
-  boundOutputLines,
-  decodeWatcherOutput,
-  formatWatcherOutput,
-  WatcherProtocolError,
-} from "./output.js";
-import type { WatcherOutputRequest, WatcherOutputResult } from "./output.js";
+import { decodeWatcherOutput, formatWatcherOutput, WatcherProtocolError } from "./output.js";
+import type { WatcherOutputResult } from "./output.js";
 
 async function goldenResult(): Promise<WatcherOutputResult> {
   const fixture = await readFile(join(import.meta.dirname, "fixtures", "output.json"), "utf8");
@@ -17,13 +12,19 @@ async function goldenResult(): Promise<WatcherOutputResult> {
 
 const FULL: WatcherOutputResult = {
   generation: 7,
-  task: "lint",
-  stream: "stdout",
-  observedBytes: 8192,
-  retainedBytes: 4096,
-  evicted: false,
-  truncated: false,
-  lines: ["line one", "line two", "line three", "line four", "line five"],
+  tasks: [
+    {
+      id: "lint",
+      stdout: {
+        content: "line one\nline two\nline three\nline four\nline five\n",
+        lines: 5,
+        retainedBytes: 4096,
+        observedBytes: 8192,
+        truncated: false,
+      },
+      stderr: null,
+    },
+  ],
 };
 
 describe("decodeWatcherOutput", () => {
@@ -32,151 +33,124 @@ describe("decodeWatcherOutput", () => {
 
     expect(result).toEqual({
       generation: 7,
-      task: "lint",
-      stream: "stdout",
-      observedBytes: 8192,
-      retainedBytes: 4096,
-      evicted: false,
-      truncated: true,
-      lines: ["failure: boom", "  at src/main.rs:12"],
+      tasks: [
+        {
+          id: "lint",
+          stdout: {
+            content: "failure: boom\n  at src/main.rs:12\n",
+            lines: 2,
+            retainedBytes: 4096,
+            observedBytes: 8192,
+            truncated: true,
+          },
+          stderr: null,
+        },
+        {
+          id: "test",
+          stdout: null,
+          stderr: {
+            content: "error: nope\n",
+            lines: 1,
+            retainedBytes: 13,
+            observedBytes: 13,
+            truncated: false,
+          },
+        },
+      ],
     });
   });
 
-  it("accepts a whole-generation result with no task or stream identity", async () => {
+  it("accepts a whole-generation result with multiple retained tasks", async () => {
     const result = decodeWatcherOutput({
-      generation: 7,
-      task: null,
-      stream: null,
-      observedBytes: 0,
-      retainedBytes: 0,
-      evicted: true,
-      truncated: false,
-      lines: [],
+      generation: 3,
+      tasks: [
+        {
+          id: "a",
+          stdout: {
+            content: "ok\n",
+            lines: 1,
+            retainedBytes: 3,
+            observedBytes: 3,
+            truncated: false,
+          },
+          stderr: null,
+        },
+        {
+          id: "b",
+          stdout: null,
+          stderr: {
+            content: "err\n",
+            lines: 1,
+            retainedBytes: 4,
+            observedBytes: 4,
+            truncated: false,
+          },
+        },
+      ],
     });
 
-    expect(result.task).toBeNull();
-    expect(result.stream).toBeNull();
-    expect(result.evicted).toBe(true);
+    expect(result.tasks).toHaveLength(2);
+    expect(result.tasks.map((task) => task.id)).toEqual(["a", "b"]);
   });
 
-  it("distinguishes concurrent task identities within one generation", () => {
-    const taskA = decodeWatcherOutput({ ...FULL, task: "lint", observedBytes: 1024 });
-    const taskB = decodeWatcherOutput({ ...FULL, task: "test", observedBytes: 2048 });
+  it("accepts empty streams as null without an explicit value", () => {
+    const result = decodeWatcherOutput({
+      generation: 1,
+      tasks: [{ id: "solo", stdout: null, stderr: null }],
+    });
 
-    expect(formatWatcherOutput(taskA).split("\n")[0]).toMatch(
-      /task=lint stream=stdout retained=4096 observed=1024/,
-    );
-    expect(formatWatcherOutput(taskB).split("\n")[0]).toMatch(
-      /task=test stream=stdout retained=4096 observed=2048/,
-    );
-    expect(taskA).not.toEqual(taskB);
+    expect(result.tasks[0]!.stdout).toBeNull();
+    expect(result.tasks[0]!.stderr).toBeNull();
   });
 
   it("rejects a missing generation", () => {
+    expect(() => decodeWatcherOutput({ tasks: [] })).toThrow(WatcherProtocolError);
+    expect(() => decodeWatcherOutput({ tasks: [] })).toThrow(/generation/);
+  });
+
+  it("rejects a missing tasks array", () => {
+    expect(() => decodeWatcherOutput({ generation: 1 })).toThrow(/tasks/);
+  });
+
+  it("rejects a malformed task entry without an id", () => {
+    expect(() =>
+      decodeWatcherOutput({ generation: 1, tasks: [{ stdout: null, stderr: null }] }),
+    ).toThrow(/output task at index 0: "id" is required/);
+  });
+
+  it("rejects a non-string stream content (non-UTF8 payloads fail closed)", () => {
     expect(() =>
       decodeWatcherOutput({
-        task: null,
-        stream: null,
-        observedBytes: 0,
-        retainedBytes: 0,
-        evicted: false,
-        truncated: false,
-        lines: [],
+        generation: 1,
+        tasks: [
+          {
+            id: "x",
+            stdout: { content: 42, lines: 1, retainedBytes: 1, observedBytes: 1, truncated: false },
+            stderr: null,
+          },
+        ],
       }),
-    ).toThrow(WatcherProtocolError);
+    ).toThrow(/output task at index 0 "stdout": "content" must be a string/);
   });
 
-  it("rejects a non-string line (non-UTF8 payloads fail closed)", () => {
+  it("rejects a stream without truncated", () => {
     expect(() =>
       decodeWatcherOutput({
-        generation: 7,
-        task: null,
-        stream: null,
-        observedBytes: 0,
-        retainedBytes: 0,
-        evicted: false,
-        truncated: false,
-        lines: ["ok", 42],
+        generation: 1,
+        tasks: [
+          {
+            id: "x",
+            stdout: { content: "a\n", lines: 1, retainedBytes: 1, observedBytes: 1 },
+            stderr: null,
+          },
+        ],
       }),
-    ).toThrow(/line at index 1 must be a string/);
-  });
-
-  it("rejects an unknown stream value", () => {
-    expect(() =>
-      decodeWatcherOutput({
-        generation: 7,
-        task: null,
-        stream: "telemetry",
-        observedBytes: 0,
-        retainedBytes: 0,
-        evicted: false,
-        truncated: false,
-        lines: [],
-      }),
-    ).toThrow(/stream/);
-  });
-});
-
-describe("boundOutputLines", () => {
-  it("keeps the last 40 lines by default and marks truncation", () => {
-    const manyLines = Array.from({ length: 46 }, (_, index) => `line ${index}`);
-    const request: WatcherOutputRequest = { generation: 7 };
-
-    const result = boundOutputLines({ ...FULL, lines: manyLines }, request);
-
-    expect(result.lines).toHaveLength(40);
-    expect(result.lines[0]).toBe("line 6");
-    expect(result.truncated).toBe(true);
-  });
-
-  it("honors an explicit tail", () => {
-    const request: WatcherOutputRequest = { generation: 7, tail: 2 };
-
-    const result = boundOutputLines(FULL, request);
-
-    expect(result.lines).toEqual(["line four", "line five"]);
-    expect(result.truncated).toBe(true);
-  });
-
-  it("returns every retained line in full mode without client truncation", () => {
-    const request: WatcherOutputRequest = { generation: 7, full: true };
-
-    const result = boundOutputLines(FULL, request);
-
-    expect(result.lines).toEqual(FULL.lines);
-    expect(result.truncated).toBe(false);
-  });
-
-  it("keeps server-side truncation visible in full mode", () => {
-    const request: WatcherOutputRequest = { generation: 7, full: true };
-
-    const result = boundOutputLines({ ...FULL, truncated: true }, request);
-
-    expect(result.lines).toEqual(FULL.lines);
-    expect(result.truncated).toBe(true);
-  });
-
-  it("returns zero lines for a zero tail", () => {
-    const request: WatcherOutputRequest = { generation: 7, tail: 0 };
-
-    const result = boundOutputLines(FULL, request);
-
-    expect(result.lines).toEqual([]);
-    expect(result.truncated).toBe(true);
-  });
-
-  it("leaves a short default tail untruncated", () => {
-    const request: WatcherOutputRequest = { generation: 7 };
-
-    const result = boundOutputLines(FULL, request);
-
-    expect(result.lines).toEqual(FULL.lines);
-    expect(result.truncated).toBe(false);
+    ).toThrow(/output task at index 0 "stdout": "truncated" is required/);
   });
 });
 
 describe("formatWatcherOutput", () => {
-  it("reports the exact selected identity and byte counts", () => {
+  it("reports the exact task, stream, and byte counts", () => {
     expect(formatWatcherOutput(FULL).split("\n")[0]).toBe(
       "OUTPUT gen=7 task=lint stream=stdout retained=4096 observed=8192",
     );
@@ -185,27 +159,80 @@ describe("formatWatcherOutput", () => {
   it("preserves line boundaries without terminal-width dependence", () => {
     const text = formatWatcherOutput(FULL);
 
-    expect(text).toBe(
-      "OUTPUT gen=7 task=lint stream=stdout retained=4096 observed=8192\n" +
-        "  line one\n  line two\n  line three\n  line four\n  line five",
-    );
+    expect(text).toContain("\n  line one\n  line two\n  line three\n  line four\n  line five");
   });
 
-  it("labels eviction explicitly", () => {
-    const text = formatWatcherOutput({ ...FULL, evicted: true, retainedBytes: 0, lines: [] });
+  it("renders one block per task and stream for whole-generation retrieval", () => {
+    const text = formatWatcherOutput({
+      generation: 7,
+      tasks: [
+        {
+          id: "lint",
+          stdout: {
+            content: "ok\n",
+            lines: 1,
+            retainedBytes: 3,
+            observedBytes: 3,
+            truncated: false,
+          },
+          stderr: null,
+        },
+        {
+          id: "test",
+          stdout: null,
+          stderr: {
+            content: "err\n",
+            lines: 1,
+            retainedBytes: 4,
+            observedBytes: 4,
+            truncated: true,
+          },
+        },
+      ],
+    });
 
-    expect(text).toBe("OUTPUT gen=7 task=lint stream=stdout retained=0 observed=8192 evicted");
+    expect(text).toContain("task=lint stream=stdout");
+    expect(text).toContain("task=test stream=stderr");
+    expect(text).toContain("truncated");
   });
 
   it("labels truncation explicitly", () => {
-    const text = formatWatcherOutput({ ...FULL, truncated: true });
+    const text = formatWatcherOutput({
+      ...FULL,
+      tasks: [
+        {
+          id: "lint",
+          stdout: {
+            content: "a\n",
+            lines: 1,
+            retainedBytes: 4096,
+            observedBytes: 8192,
+            truncated: true,
+          },
+          stderr: null,
+        },
+      ],
+    });
 
     expect(text.split("\n")[0]).toMatch(/ truncated$/);
   });
 
-  it("renders whole-generation and both-stream identities as all", () => {
-    expect(formatWatcherOutput({ ...FULL, task: null, stream: null }).split("\n")[0]).toBe(
-      "OUTPUT gen=7 task=all stream=all retained=4096 observed=8192",
-    );
+  it("renders an empty header for a task with no retained content", () => {
+    const text = formatWatcherOutput({
+      generation: 7,
+      tasks: [
+        {
+          id: "lint",
+          stdout: { content: "", lines: 0, retainedBytes: 0, observedBytes: 0, truncated: false },
+          stderr: null,
+        },
+      ],
+    });
+
+    expect(text).toBe("OUTPUT gen=7 task=lint stream=stdout retained=0 observed=0");
+  });
+
+  it("renders a zero-task header when nothing was retained", () => {
+    expect(formatWatcherOutput({ generation: 9, tasks: [] })).toBe("OUTPUT gen=9 tasks=0");
   });
 });

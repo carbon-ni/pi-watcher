@@ -10,10 +10,9 @@ import funzzyStatus from "./index.js";
 /**
  * Real-watcher smoke (contract §8 legacy fallback): drives the real
  * composition root against the actual `fzz` binary over a real control
- * socket. The current server only implements status/targets/run, so this
- * proves the negotiated legacy path — polled freshness labels, verify via
- * schedule + poll, output unavailable, cancel unknown. Skipped unless a
- * built binary is available (opt-in via FUNZZY_BIN, like the Rust
+ * socket. Proves the negotiated path — polled freshness labels, verify via
+ * schedule + poll, retained output retrieval, cancel unknown. Skipped unless
+ * a built binary is available (opt-in via FUNZZY_BIN, like the Rust
  * test-integration convention).
  */
 
@@ -69,7 +68,7 @@ function createPi() {
 }
 
 describe.skipIf(!binaryAvailable)("real watcher binary (legacy fallback)", () => {
-  it("drives status, targets, observe, verify, output-unavailable, and cancel-unknown over the real control socket", async () => {
+  it("drives status, targets, observe, verify, output-retrieval, and cancel-unknown over the real control socket", async () => {
     const dir = mkdtempSync(join(tmpdir(), "pi-real-watcher-"));
     let fzz: ReturnType<typeof spawn> | null = null;
     try {
@@ -163,8 +162,15 @@ describe.skipIf(!binaryAvailable)("real watcher binary (legacy fallback)", () =>
       expect(verify.details.fingerprint).toBe(verify.details.fingerprintBefore);
       expect(verify.content[0]!.text).toContain("PASS");
 
-      // Output retrieval is unavailable on the real server today.
-      await expect(run("watcher_output", { generation: 1 })).rejects.toThrow();
+      // Retained output retrieval works against the real server: the exact
+      // generation echoes the retained lint task streams.
+      const output = (await run("watcher_output", { generation: 1 })) as {
+        content: Array<{ text: string }>;
+        details: { generation: number; tasks: Array<{ id: string }> };
+      };
+      expect(output.details.generation).toBe(1);
+      expect(output.details.tasks.map((task) => task.id)).toContain("lint");
+      expect(output.content[0]!.text).toContain("OUTPUT gen=1");
 
       // Cancel is a compare-and-cancel: an idle generation is a safe no-op.
       const cancel = (await run("watcher_cancel", { generation: 1 })) as {

@@ -52,6 +52,19 @@ export function createFailureNotifier(
 }
 
 /**
+ * Extract the failed task name from a status failure entry for actionable
+ * follow-up hints. Failure entries are `"<task>: <error>"`; a malformed
+ * entry returns null so the hint stays conservative.
+ */
+export function firstFailedTask(failures: readonly string[]): string | null {
+  for (const failure of failures) {
+    const separator = failure.indexOf(": ");
+    if (separator > 0) return failure.slice(0, separator);
+  }
+  return null;
+}
+
+/**
  * Ledger key for at-most-once delivery. Subscription observations carry the
  * watcher instance identity, so instance + generation uniquely identify the
  * failure across reconnects and restarts. Legacy polled observations have no

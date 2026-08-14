@@ -292,13 +292,19 @@ test("formats compact passed and failed receipts", () => {
 
 const outputResult = {
   generation: 7,
-  task: "lint",
-  stream: "stdout",
-  observedBytes: 8192,
-  retainedBytes: 4096,
-  evicted: false,
-  truncated: false,
-  lines: ["line one", "line two"],
+  tasks: [
+    {
+      id: "lint",
+      stdout: {
+        content: "line one\nline two\n",
+        lines: 2,
+        observedBytes: 8192,
+        retainedBytes: 4096,
+        truncated: false,
+      },
+      stderr: null,
+    },
+  ],
 };
 
 test("requests bounded output for an exact generation and task", async () => {
@@ -323,9 +329,10 @@ test("requests bounded output for an exact generation and task", async () => {
       500,
     );
     assert.equal(result.generation, 7);
-    assert.equal(result.task, "lint");
-    assert.deepEqual(result.lines, ["line one", "line two"]);
-    assert.equal(result.truncated, false);
+    assert.equal(result.tasks.length, 1);
+    assert.equal(result.tasks[0]!.id, "lint");
+    assert.deepEqual(result.tasks[0]!.stdout?.content, "line one\nline two\n");
+    assert.equal(result.tasks[0]!.stdout?.truncated, false);
   } finally {
     await new Promise<void>((resolve, reject) =>
       server.close((error) => (error ? reject(error) : resolve())),

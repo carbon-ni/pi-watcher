@@ -20,7 +20,7 @@ Read nearest nested `AGENTS.md` before changing a layer. Do not add reverse depe
 
 ## Public compatibility surfaces
 
-- Tools: `watcher_status`, `watcher_targets`, `watcher_verify`.
+- Tools: `watcher_status`, `watcher_targets`, `watcher_observe`, `watcher_output`, `watcher_cancel`, `watcher_verify`.
 - Commands: `/watcher-status`, `/watcher-targets`, `/watcher-responder`, `/watcher-disconnect`, `/watcher-connect`.
 - Status bar entry uses `watcher:` terminology and state-aware theme colors.
 - Project contract is `.watch.yaml`/`.watch.yml` `on.socket`.
@@ -30,6 +30,7 @@ Do not restore deprecated `funzzy_*` or `/funzzy-*` names. Funzzy remains infras
 ## Task routes
 
 - Public Pi behavior or lifecycle: start at `src/index.ts`; test registration in `src/commands.test.ts`.
+- The end-to-end feedback loop: `src/e2e.test.ts` drives the real composition root against a scripted protocol server on a real Unix socket with a real git worktree — extend it when the loop contract changes.
 - Stable verification behavior: change `src/application/stable-run.ts` and colocated test.
 - Status/target/failure policy: change `src/domain/` and colocated tests.
 - Socket, config, Git, or responder persistence: change matching `src/infra/` adapter and test.

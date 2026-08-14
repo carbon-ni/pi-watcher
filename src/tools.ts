@@ -393,7 +393,9 @@ export function registerTools(pi: ExtensionAPI, deps: ToolDeps): void {
           signal,
           (runId) => {
             generation = runId;
-            armCancel();
+            // Only cancel when the tool was actually aborted; a clean run
+            // must never receive a compare-and-cancel.
+            if (signal?.aborted) armCancel();
           },
         );
       } finally {

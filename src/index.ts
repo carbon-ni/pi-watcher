@@ -112,7 +112,7 @@ export default function funzzyStatus(pi: ExtensionAPI) {
     formatStatus,
     listTargets,
     formatTargets,
-    verifyRequest: async (config, request, fingerprint, signal) => {
+    verifyRequest: async (config, request, fingerprint, signal, onGeneration) => {
       const profile = await loadCapabilities(config.socketPath, capabilityCache);
       const port =
         profile.features.atomicAwait && profile.features.correlatedSnapshots
@@ -123,7 +123,7 @@ export default function funzzyStatus(pi: ExtensionAPI) {
               requestRun,
               queryStatus,
             });
-      return requestVerifiedRun(request, { port, fingerprint, signal });
+      return requestVerifiedRun(request, { port, fingerprint, signal, onGeneration });
     },
     worktreeFingerprint,
     createObservePort: async (config) => {

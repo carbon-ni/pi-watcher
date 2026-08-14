@@ -133,3 +133,18 @@ Stated for common loops; budgets are the contract for token efficiency and laten
 | status snapshot (current) | 1 poll per 1 s; socket request timeout 1 s  | ≤ 1 s                                                         | content ≤ 600 chars; details ≤ 8 KB                                 |
 
 Total agent context cost of a common failure loop (observe + verify + output) stays under ~80 KB, dominated by the bounded output retrieval, never by polling traffic.
+
+## 10. Trust boundary and copyable agent workflow
+
+**Trust boundary.** Every tool requires a trusted project: `.watch.yaml`/`.watch.yml` `on.socket` inside a workspace the agent's host has explicitly trusted. Edit checkpoints normalize against that project root and never leak unrelated workspace paths; correlation is evidence of inclusion, never causation. The extension never claims a guarantee the protocol does not provide — degraded modes are labelled ([§8](#8-compatibility-fallback)), never equated.
+
+**Copyable workflow** (the loop proven end to end in `src/e2e.test.ts`):
+
+1. `watcher_observe` (snapshot) → record the baseline generation `G` and state.
+2. Edit the worktree (edit/write results form the session checkpoint).
+3. `watcher_observe(wait: true, afterGeneration: G)` → the first fresh terminal result. A `superseded` or `stale` outcome is never accepted as the fresh checkpoint; re-observe with the newer generation.
+4. On `failed` with `truncated: true`, run the copyable `next` action (`watcher_output generation=N [task=X]`) for bounded evidence, apply the fix, and repeat from step 3 until the observation is fresh and green.
+5. `watcher_verify(target)` accepts green only under the §4 contract (instance continuity, freshness, unchanged fingerprint) — correlation never upgrades stale green.
+6. Abandoning a running verify: the tool abort sends compare-and-cancel for the exact generation (`cleanup=cancelled`); explicit `watcher_cancel(generation=N)` also works. A stale or replacement generation is a safe no-op.
+
+Deterministic test proof: the e2e suite drives the real composition root against a scripted protocol server on a real Unix socket, with a real git worktree behind the fingerprint — every step control-driven, no sleeps, no environment mutation beyond a temp dir.

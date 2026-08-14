@@ -1,7 +1,7 @@
 ---
 id: TASK-0009
 title: Correlate successful Pi edits with watcher batches conservatively
-status: todo
+status: done
 depends_on: [TASK-0002]
 priority: normal
 tags: [typescript, domain, tools, correlation, freshness, tdd]

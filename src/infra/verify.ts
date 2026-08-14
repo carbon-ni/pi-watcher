@@ -28,7 +28,14 @@ export function createAtomicVerifyPort(
   return {
     async runAndAwait(request: AtomicRunRequest): Promise<AtomicRunOutcome> {
       try {
-        const result = await requestRunAtomic(socketPath, request.target, request.timeoutMs);
+        const result = await requestRunAtomic(
+          socketPath,
+          request.target,
+          request.timeoutMs,
+          (runId) => request.onSchedule?.(runId),
+          request.signal,
+        );
+        if (request.signal?.aborted) return { kind: "aborted" };
         if (
           expectedInstanceToken !== null &&
           result.snapshot.instance.token !== expectedInstanceToken
@@ -84,6 +91,7 @@ export function createLegacyVerifyPort(options: LegacyVerifyPortOptions): Verify
     async runAndAwait(request: AtomicRunRequest): Promise<AtomicRunOutcome> {
       try {
         const runId = await options.requestRun(options.socketPath, request.target);
+        request.onSchedule?.(runId);
         const status = await waitForRun(
           runId,
           request.timeoutMs,

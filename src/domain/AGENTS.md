@@ -10,6 +10,7 @@ Owns watcher vocabulary and deterministic decisions.
 - `status-presentation.ts`: renders and colors compact user-facing watcher status.
 - `observation-result.ts`: builds and formats one decision-oriented `watcher_observe` result (outcomes, evidence bounds, next-action hints).
 - `output.ts`: decodes and bounds one `watcher_output` retrieval (identity, observed/retained bytes, eviction, truncation) and formats it without terminal-width dependence.
+- `cancel.ts`: compare-and-cancel vocabulary (outcomes, decode, cleanup report) so a stale generation is always a safe no-op.
 - `targets-presentation.ts`: renders the compact user-facing target list.
 
 ## Boundaries

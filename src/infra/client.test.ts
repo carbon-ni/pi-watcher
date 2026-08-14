@@ -4,14 +4,36 @@ import { createServer } from "node:net";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { test } from "vitest";
-import { formatStatus, listTargets, queryStatus, requestOutput, requestRun } from "./client.js";
-import { FunzzyDisconnectError } from "./client.js";
+import {
+  formatStatus,
+  listTargets,
+  queryStatus,
+  requestCancel,
+  requestOutput,
+  requestRun,
+  requestRunAtomic,
+} from "./client.js";
+import { FunzzyDisconnectError, FunzzyRpcError } from "./client.js";
 
 const passed = {
   generation: 4,
   state: "passed" as const,
   trigger: "src/main.rs",
   commands: ["cargo test"],
+  durationMs: 42,
+  failures: [],
+};
+
+const passedOutputSnapshot = {
+  instance: { token: "fz-7f3a", startedAtEpochMs: 1710000000000 },
+  generation: 7,
+  batchId: "b-21",
+  state: "passed",
+  trigger: "control:lint",
+  commands: ["make all"],
+  tasks: [{ id: "t-2", name: "lint", state: "passed", durationMs: 42 }],
+  pending: 0,
+  freshness: "current",
   durationMs: 42,
   failures: [],
 };
@@ -397,6 +419,166 @@ test("aborts the retrieval promptly on AbortSignal", async () => {
 
   try {
     await assert.rejects(request, /Funzzy output retrieval was cancelled/);
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => (error ? reject(error) : resolve())),
+    );
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("cancels an exact generation with compare-and-cancel identity", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "funzzy-extension-"));
+  const socketPath = join(directory, "control.sock");
+  const server = createServer((socket) => {
+    socket.once("data", (request) => {
+      assert.match(request.toString(), /"method":"cancel"/);
+      assert.match(request.toString(), /"generation":7/);
+      assert.match(request.toString(), /"instanceToken":"fz-7f3a"/);
+      socket.end(
+        `${JSON.stringify({ jsonrpc: "2.0", id: "cancel", result: { cancelled: true, generation: 7 } })}\n`,
+      );
+    });
+  });
+  await new Promise<void>((resolve) => server.listen(socketPath, resolve));
+
+  try {
+    const result = await requestCancel(socketPath, 7, "fz-7f3a", 500);
+    assert.deepEqual(result, { cancelled: true, generation: 7 });
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => (error ? reject(error) : resolve())),
+    );
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("propagates an escalated-cleanup RPC error for the cancel request", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "funzzy-extension-"));
+  const socketPath = join(directory, "control.sock");
+  const server = createServer((socket) => {
+    socket.once("data", () => {
+      socket.end(
+        `${JSON.stringify({ jsonrpc: "2.0", id: "cancel", error: { code: -32021, message: "Cancellation escalated" } })}\n`,
+      );
+    });
+  });
+  await new Promise<void>((resolve) => server.listen(socketPath, resolve));
+
+  try {
+    await assert.rejects(
+      () => requestCancel(socketPath, 7, "fz-7f3a", 500),
+      (error: unknown) => error instanceof FunzzyRpcError && error.code === -32021,
+    );
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => (error ? reject(error) : resolve())),
+    );
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("reads the atomic schedule ack and the runComplete snapshot from one connection", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "funzzy-extension-"));
+  const socketPath = join(directory, "control.sock");
+  const server = createServer((socket) => {
+    socket.once("data", (request) => {
+      assert.match(request.toString(), /"wait":true/);
+      socket.write(`${JSON.stringify({ jsonrpc: "2.0", id: "run", result: { runId: 7 } })}\n`);
+      setTimeout(() => {
+        socket.end(
+          `${JSON.stringify({ jsonrpc: "2.0", method: "runComplete", params: { runId: 7, snapshot: passedOutputSnapshot } })}\n`,
+        );
+      }, 20);
+    });
+  });
+  await new Promise<void>((resolve) => server.listen(socketPath, resolve));
+
+  const scheduled: number[] = [];
+  try {
+    const result = await requestRunAtomic(socketPath, "lint", 500, (runId) => {
+      scheduled.push(runId);
+    });
+    assert.deepEqual(scheduled, [7]);
+    assert.equal(result.runId, 7);
+    assert.equal(result.snapshot.state, "passed");
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => (error ? reject(error) : resolve())),
+    );
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("fails the atomic run on a schedule-ack RPC error", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "funzzy-extension-"));
+  const socketPath = join(directory, "control.sock");
+  const server = createServer((socket) => {
+    socket.once("data", () => {
+      socket.end(
+        `${JSON.stringify({ jsonrpc: "2.0", id: "run", error: { code: -32001, message: "Run superseded", data: { supersedingRunId: 8 } } })}\n`,
+      );
+    });
+  });
+  await new Promise<void>((resolve) => server.listen(socketPath, resolve));
+
+  try {
+    await assert.rejects(
+      () => requestRunAtomic(socketPath, "lint", 500),
+      (error: unknown) => error instanceof FunzzyRpcError && error.code === -32001,
+    );
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => (error ? reject(error) : resolve())),
+    );
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("fails the atomic run on a runComplete RPC error after scheduling", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "funzzy-extension-"));
+  const socketPath = join(directory, "control.sock");
+  const server = createServer((socket) => {
+    socket.once("data", () => {
+      socket.write(`${JSON.stringify({ jsonrpc: "2.0", id: "run", result: { runId: 7 } })}\n`);
+      setTimeout(() => {
+        socket.end(
+          `${JSON.stringify({ jsonrpc: "2.0", method: "runComplete", error: { code: -32002, message: "Run cancelled" } })}\n`,
+        );
+      }, 20);
+    });
+  });
+  await new Promise<void>((resolve) => server.listen(socketPath, resolve));
+
+  try {
+    await assert.rejects(
+      () => requestRunAtomic(socketPath, "lint", 500),
+      (error: unknown) => error instanceof FunzzyRpcError && error.code === -32002,
+    );
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => (error ? reject(error) : resolve())),
+    );
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("reports disconnect when the atomic run connection drops after scheduling", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "funzzy-extension-"));
+  const socketPath = join(directory, "control.sock");
+  const server = createServer((socket) => {
+    socket.once("data", () => {
+      socket.write(`${JSON.stringify({ jsonrpc: "2.0", id: "run", result: { runId: 7 } })}\n`);
+      socket.end();
+    });
+  });
+  await new Promise<void>((resolve) => server.listen(socketPath, resolve));
+
+  try {
+    await assert.rejects(
+      () => requestRunAtomic(socketPath, "lint", 500),
+      (error: unknown) => error instanceof FunzzyDisconnectError,
+    );
   } finally {
     await new Promise<void>((resolve, reject) =>
       server.close((error) => (error ? reject(error) : resolve())),

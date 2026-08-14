@@ -89,6 +89,43 @@ describe("evidence bounding", () => {
   });
 });
 
+describe("generation reporting", () => {
+  it("bridges the scheduled generation to the caller as soon as it is known", async () => {
+    const generations: number[] = [];
+    const port: VerifyPort = {
+      async runAndAwait(request) {
+        request.onSchedule?.(7);
+        return terminal();
+      },
+    };
+
+    await requestVerifiedRun(
+      { target: "lint" },
+      { port, fingerprint, onGeneration: (generation) => generations.push(generation) },
+    );
+
+    expect(generations).toEqual([7]);
+  });
+
+  it("reports the newest generation after a superseded retry", async () => {
+    const generations: number[] = [];
+    const port: VerifyPort = {
+      async runAndAwait(request) {
+        request.onSchedule?.(6);
+        return { kind: "superseded", generation: 6, supersedingRunId: 7 };
+      },
+    };
+
+    const result = await requestVerifiedRun(
+      { target: "lint", timeoutMs: 120_000, matchMode: "exact" },
+      { port, fingerprint, onGeneration: (generation) => generations.push(generation) },
+    );
+
+    expect(result.reason).toBe("superseded");
+    expect(generations).toEqual([6, 6, 6]);
+  });
+});
+
 describe("atomic acceptance", () => {
   it("accepts green only when instance, freshness, pending, and fingerprints hold", async () => {
     const { port, calls } = createFakePort([terminal()]);

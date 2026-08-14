@@ -178,6 +178,7 @@ describe("funzzyStatus registration", () => {
       "watcher_targets",
       "watcher_observe",
       "watcher_output",
+      "watcher_cancel",
       "watcher_verify",
     ]);
     expect(tools).not.toContain("funzzy_status");

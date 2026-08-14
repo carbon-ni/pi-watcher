@@ -19,6 +19,7 @@ import {
   type WatcherOutputRequest,
   type WatcherOutputResult,
 } from "../domain/output.js";
+import { decodeWatcherCancel } from "../domain/cancel.js";
 import {
   decodeWatcherRun,
   decodeWatcherStatus,
@@ -43,6 +44,8 @@ interface RpcError {
 interface ControlResponse {
   jsonrpc: "2.0";
   id: string | number | null;
+  method?: unknown;
+  params?: unknown;
   result?: unknown;
   error?: RpcError;
 }
@@ -93,21 +96,170 @@ export function queryCapabilities(
 }
 
 /**
- * Atomic run-and-await (agreed additive contract): one server operation
- * returns the requested generation plus its terminal correlated snapshot.
- * Never retried after connection because scheduling is not idempotent.
+ * Atomic run-and-await (agreed additive contract): one connection carries an
+ * immediate schedule acknowledgement `{runId}` and then a `runComplete`
+ * notification `{runId, snapshot}` at terminal. `onSchedule` fires as soon as
+ * the exact generation is known, so cancellation effects can be armed before
+ * the run finishes. AbortSignal interrupts the wait without touching the
+ * server; the caller is responsible for the exact-generation cancel. Never
+ * retried after connection because scheduling is not idempotent.
  */
-export function requestRunAtomic(
+export async function requestRunAtomic(
   socketPath: string,
   target: string,
   timeoutMs = 120_000,
+  onSchedule?: (runId: number) => void,
+  signal?: AbortSignal,
 ): Promise<AtomicRunResult> {
+  const deadline = Date.now() + timeoutMs;
+  let lastConnectionError: Error | undefined;
+  let retries = 0;
+
+  while (Date.now() < deadline) {
+    if (signal?.aborted) throw new Error("Funzzy atomic run was cancelled");
+    try {
+      const result = await runAtomicOnce(
+        socketPath,
+        target,
+        Math.max(1, deadline - Date.now()),
+        onSchedule,
+        signal,
+      );
+      if (retries > 0) debugLog(`connected to ${socketPath} after ${retries} retries`);
+      return result;
+    } catch (error) {
+      if (!(error instanceof RetryableRequestError)) throw error;
+      retries += 1;
+      lastConnectionError = error.cause;
+      debugLog(`retry ${retries} for ${socketPath}: ${error.cause.message}`);
+      await delay(Math.min(50, Math.max(1, deadline - Date.now())));
+    }
+  }
+
+  const reason = lastConnectionError ? `: ${lastConnectionError.message}` : "";
+  debugLog(`connection failed for ${socketPath} after ${retries} retries${reason}`);
+  throw new FunzzyDisconnectError(`Funzzy unavailable after ${timeoutMs}ms${reason}`);
+}
+
+function runAtomicOnce(
+  socketPath: string,
+  target: string,
+  timeoutMs: number,
+  onSchedule: ((runId: number) => void) | undefined,
+  signal: AbortSignal | undefined,
+): Promise<AtomicRunResult> {
+  return new Promise((resolve, reject) => {
+    const socket = createConnection(socketPath);
+    let buffer = "";
+    let settled = false;
+    let connected = false;
+    let scheduled = false;
+
+    const onAbort = (): void => fail(new Error("Funzzy atomic run was cancelled"));
+    const cleanup = (): void => signal?.removeEventListener("abort", onAbort);
+    const fail = (error: Error): void => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      socket.destroy();
+      reject(error);
+    };
+
+    const parseMessage = (line: string): void => {
+      try {
+        const parsed = JSON.parse(line) as ControlResponse;
+        if (parsed.jsonrpc !== "2.0") {
+          throw new Error(`Unsupported Funzzy JSON-RPC version: ${parsed.jsonrpc}`);
+        }
+        if (parsed.error)
+          throw new FunzzyRpcError(
+            parsed.error.code,
+            formatRpcError(parsed.error),
+            parsed.error.data,
+          );
+        if (!scheduled) {
+          if (parsed.result === undefined) throw new Error("Funzzy run response has no result");
+          scheduled = true;
+          const runId = decodeWatcherRun(parsed.result);
+          onSchedule?.(runId);
+          return;
+        }
+        if (parsed.method === "runComplete" && parsed.params !== undefined) {
+          const result = decodeAtomicRunResult(parsed.params);
+          settled = true;
+          cleanup();
+          socket.end();
+          resolve(result);
+          return;
+        }
+        throw new Error(`Funzzy atomic run sent an unexpected message: ${line.slice(0, 200)}`);
+      } catch (error) {
+        fail(error instanceof Error ? error : new Error(String(error)));
+      }
+    };
+
+    signal?.addEventListener("abort", onAbort, { once: true });
+    socket.setTimeout(timeoutMs, () =>
+      fail(new FunzzyRequestTimeoutError(`Funzzy atomic run timed out after ${timeoutMs}ms`)),
+    );
+    socket.once("error", (error) => {
+      if (!connected && isRetryableSocketError(error)) {
+        fail(new RetryableRequestError(error));
+        return;
+      }
+      fail(error);
+    });
+    socket.once("connect", () => {
+      connected = true;
+      socket.write(
+        `${JSON.stringify({ jsonrpc: "2.0", id: "run", method: "run", params: { target, wait: true } })}\n`,
+      );
+    });
+    socket.on("data", (chunk) => {
+      buffer += chunk.toString("utf8");
+      if (buffer.length > 65_536) {
+        fail(new Error("Funzzy response exceeded 64KB"));
+        return;
+      }
+      let newline = buffer.indexOf("\n");
+      while (newline >= 0 && !settled) {
+        const line = buffer.slice(0, newline);
+        buffer = buffer.slice(newline + 1);
+        parseMessage(line);
+        newline = buffer.indexOf("\n");
+      }
+    });
+    socket.once("end", () => {
+      if (settled) return;
+      fail(new FunzzyDisconnectError("Funzzy closed the socket without a complete response"));
+    });
+  });
+}
+
+/**
+ * Compare-and-cancel an exact generation (agreed additive contract,
+ * `src/domain/fixtures/cancel.json`). The instance token plus generation make
+ * a stale request a safe no-op; read-only semantics allow interrupted
+ * transport retries. Escalation arrives as RPC error -32021 and is mapped by
+ * the cancel port.
+ */
+export function requestCancel(
+  socketPath: string,
+  generation: number,
+  instanceToken: string,
+  timeoutMs = 3_000,
+): Promise<{ cancelled: boolean; generation: number }> {
   return sendRequest(
     socketPath,
-    { jsonrpc: "2.0", id: "run", method: "run", params: { target, wait: true } },
+    {
+      jsonrpc: "2.0",
+      id: "cancel",
+      method: "cancel",
+      params: { generation, instanceToken },
+    },
     timeoutMs,
-    false,
-    decodeAtomicRunResult,
+    true,
+    decodeWatcherCancel,
   );
 }
 

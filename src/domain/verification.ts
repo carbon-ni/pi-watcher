@@ -142,11 +142,13 @@ export function formatVerification(verification: WatcherVerification): string {
 }
 
 /**
- * Decode an atomic `run` result from `unknown`.
+ * Decode a `runComplete` notification params from `unknown`.
  *
  * Wire shape is the agreed additive contract
- * (`src/domain/fixtures/atomic-run.json`): the requested generation plus its
- * terminal correlated snapshot, produced by a single server-side run-and-await.
+ * (`src/domain/fixtures/atomic-run.json`, mirrored by Rust protocol tests): the
+ * requested generation plus its terminal correlated snapshot. The atomic run
+ * delivers the schedule acknowledgement `{runId}` first on the same
+ * connection, then this notification at terminal.
  */
 export interface AtomicRunResult {
   runId: number;

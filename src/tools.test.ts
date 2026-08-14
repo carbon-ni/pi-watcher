@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { registerTools } from "./tools.js";
 import { createRequireTrustedConfig } from "./trusted-config.js";
@@ -8,6 +8,7 @@ import type { WatcherVerification } from "./domain/verification.js";
 import type { WatcherObservationResult } from "./domain/observation-result.js";
 import type { WatcherObservation } from "./domain/observation.js";
 import type { WatcherOutputResult } from "./domain/output.js";
+import type { WatcherCancelResult } from "./domain/cancel.js";
 import type { WatcherStatus, WatcherTarget } from "./domain/watcher.js";
 
 const CONFIG = { socketPath: "/tmp/funzzy.sock", pollIntervalMs: 1_000 };
@@ -154,6 +155,9 @@ function createDeps(overrides: Record<string, unknown> = {}) {
     classifyObservationError: vi.fn<(error: unknown) => "disconnect" | "unknown">(() => "unknown"),
     requestObservation: vi.fn().mockResolvedValue(OBSERVE_RESULT),
     requestOutput: vi.fn().mockResolvedValue(OUTPUT_RESULT),
+    cancelGeneration: vi
+      .fn()
+      .mockResolvedValue({ outcome: "cancelled", generation: 7, message: null }),
     ...overrides,
   };
 }
@@ -172,6 +176,11 @@ function registeredTool(tools: RegisteredToolCapture[], name: string) {
   return tools.find((entry) => entry.name === name);
 }
 
+afterEach(() => {
+  vi.clearAllTimers();
+  vi.useRealTimers();
+});
+
 describe("registerTools", () => {
   it("registers the four watcher-prefixed tools", () => {
     const { pi, tools } = createPi();
@@ -183,6 +192,7 @@ describe("registerTools", () => {
       "watcher_targets",
       "watcher_observe",
       "watcher_output",
+      "watcher_cancel",
       "watcher_verify",
     ]);
   });
@@ -529,6 +539,303 @@ describe("watcher_output", () => {
   });
 });
 
+describe("watcher_cancel", () => {
+  it("cancels the exact generation with a bounded acknowledgement wait", async () => {
+    const { pi, tools } = createPi();
+    const cancelGeneration = vi
+      .fn()
+      .mockResolvedValue({ outcome: "cancelled", generation: 7, message: null });
+    registerTools(pi as never, createDeps({ cancelGeneration }));
+
+    const result = await runTool(
+      registeredTool(tools, "watcher_cancel"),
+      { generation: 7, timeoutSeconds: 5 },
+      trustedCtx(),
+    );
+
+    expect(cancelGeneration).toHaveBeenCalledWith(CONFIG, 7, 5_000);
+    expect(result.content[0]!.text).toBe("CANCEL gen=7 cancelled");
+    expect(result.details).toEqual({ outcome: "cancelled", generation: 7, message: null });
+  });
+
+  it("defaults the acknowledgement wait", async () => {
+    const { pi, tools } = createPi();
+    const cancelGeneration = vi
+      .fn()
+      .mockResolvedValue({ outcome: "not-running", generation: 7, message: null });
+    registerTools(pi as never, createDeps({ cancelGeneration }));
+
+    await runTool(registeredTool(tools, "watcher_cancel"), { generation: 7 }, trustedCtx());
+
+    expect(cancelGeneration).toHaveBeenCalledWith(CONFIG, 7, 3_000);
+  });
+
+  it("reports escalated cleanup without hiding the outcome", async () => {
+    const { pi, tools } = createPi();
+    const cancelGeneration = vi
+      .fn()
+      .mockResolvedValue({ outcome: "escalated", generation: 7, message: null });
+    registerTools(pi as never, createDeps({ cancelGeneration }));
+
+    const result = await runTool(
+      registeredTool(tools, "watcher_cancel"),
+      { generation: 7 },
+      trustedCtx(),
+    );
+
+    expect(result.content[0]!.text).toBe("CANCEL gen=7 escalated");
+  });
+});
+
+describe("watcher_verify cancellation effect", () => {
+  function abortedVerification(generation = 7) {
+    return {
+      reason: "aborted" as const,
+      target: "lint",
+      generation,
+      fingerprint: "abc123",
+      failures: [],
+    };
+  }
+
+  it("sends compare-and-cancel for the exact generation when abort fires during the run", async () => {
+    const { pi, tools } = createPi();
+    const cancelGeneration = vi
+      .fn()
+      .mockResolvedValue({ outcome: "cancelled", generation: 7, message: null });
+    const controller = new AbortController();
+    const verifyRequest = vi.fn(
+      async (
+        _config: unknown,
+        _request: unknown,
+        _fingerprint: unknown,
+        _signal: unknown,
+        onGeneration: ((generation: number) => void) | undefined,
+      ) => {
+        onGeneration?.(7);
+        controller.abort();
+        return abortedVerification();
+      },
+    );
+    registerTools(pi as never, createDeps({ verifyRequest, cancelGeneration }));
+    const tool = registeredTool(tools, "watcher_verify")!;
+
+    await expect(tool.execute("1", {}, controller.signal, undefined, trustedCtx())).rejects.toThrow(
+      "ABORTED gen=7 target=lint cleanup=cancelled",
+    );
+    expect(cancelGeneration).toHaveBeenCalledWith(CONFIG, 7, 3_000);
+  });
+
+  it("cancels even when abort lands between schedule and generation recording", async () => {
+    const { pi, tools } = createPi();
+    const cancelGeneration = vi
+      .fn()
+      .mockResolvedValue({ outcome: "cancelled", generation: 7, message: null });
+    const controller = new AbortController();
+    const verifyRequest = vi.fn(
+      async (
+        _config: unknown,
+        _request: unknown,
+        _fingerprint: unknown,
+        _signal: unknown,
+        onGeneration: ((generation: number) => void) | undefined,
+      ) => {
+        controller.abort();
+        onGeneration?.(7);
+        return abortedVerification();
+      },
+    );
+    registerTools(pi as never, createDeps({ verifyRequest, cancelGeneration }));
+    const tool = registeredTool(tools, "watcher_verify")!;
+
+    await expect(tool.execute("1", {}, controller.signal, undefined, trustedCtx())).rejects.toThrow(
+      "ABORTED gen=7 target=lint cleanup=cancelled",
+    );
+    expect(cancelGeneration).toHaveBeenCalledWith(CONFIG, 7, 3_000);
+  });
+
+  it("never cancels when abort fires before any generation is recorded", async () => {
+    const { pi, tools } = createPi();
+    const cancelGeneration = vi.fn();
+    const controller = new AbortController();
+    controller.abort();
+    const verifyRequest = vi.fn().mockResolvedValue(abortedVerification());
+    registerTools(pi as never, createDeps({ verifyRequest, cancelGeneration }));
+    const tool = registeredTool(tools, "watcher_verify")!;
+
+    await expect(tool.execute("1", {}, controller.signal, undefined, trustedCtx())).rejects.toThrow(
+      "ABORTED gen=7 target=lint cleanup=none",
+    );
+    expect(cancelGeneration).not.toHaveBeenCalled();
+  });
+
+  it("leaves replacement work untouched when the recorded generation was superseded", async () => {
+    const { pi, tools } = createPi();
+    const cancelGeneration = vi
+      .fn()
+      .mockResolvedValue({ outcome: "not-running", generation: 7, message: null });
+    const controller = new AbortController();
+    const verifyRequest = vi.fn(
+      async (
+        _config: unknown,
+        _request: unknown,
+        _fingerprint: unknown,
+        _signal: unknown,
+        onGeneration: ((generation: number) => void) | undefined,
+      ) => {
+        onGeneration?.(7);
+        controller.abort();
+        return abortedVerification();
+      },
+    );
+    registerTools(pi as never, createDeps({ verifyRequest, cancelGeneration }));
+    const tool = registeredTool(tools, "watcher_verify")!;
+
+    await expect(tool.execute("1", {}, controller.signal, undefined, trustedCtx())).rejects.toThrow(
+      "ABORTED gen=7 target=lint cleanup=none",
+    );
+    expect(cancelGeneration).toHaveBeenCalledWith(CONFIG, 7, 3_000);
+  });
+
+  it("reports escalated cleanup from the server", async () => {
+    const { pi, tools } = createPi();
+    const cancelGeneration = vi
+      .fn()
+      .mockResolvedValue({ outcome: "escalated", generation: 7, message: null });
+    const controller = new AbortController();
+    const verifyRequest = vi.fn(
+      async (
+        _config: unknown,
+        _request: unknown,
+        _fingerprint: unknown,
+        _signal: unknown,
+        onGeneration: ((generation: number) => void) | undefined,
+      ) => {
+        onGeneration?.(7);
+        controller.abort();
+        return abortedVerification();
+      },
+    );
+    registerTools(pi as never, createDeps({ verifyRequest, cancelGeneration }));
+    const tool = registeredTool(tools, "watcher_verify")!;
+
+    await expect(tool.execute("1", {}, controller.signal, undefined, trustedCtx())).rejects.toThrow(
+      "ABORTED gen=7 target=lint cleanup=escalated",
+    );
+  });
+
+  it("reports unknown cleanup when the acknowledgement cannot be confirmed", async () => {
+    const { pi, tools } = createPi();
+    const cancelGeneration = vi
+      .fn()
+      .mockResolvedValue({ outcome: "unknown", generation: 7, message: "socket gone" });
+    const controller = new AbortController();
+    const verifyRequest = vi.fn(
+      async (
+        _config: unknown,
+        _request: unknown,
+        _fingerprint: unknown,
+        _signal: unknown,
+        onGeneration: ((generation: number) => void) | undefined,
+      ) => {
+        onGeneration?.(7);
+        controller.abort();
+        return abortedVerification();
+      },
+    );
+    registerTools(pi as never, createDeps({ verifyRequest, cancelGeneration }));
+    const tool = registeredTool(tools, "watcher_verify")!;
+
+    await expect(tool.execute("1", {}, controller.signal, undefined, trustedCtx())).rejects.toThrow(
+      "ABORTED gen=7 target=lint cleanup=unknown",
+    );
+  });
+
+  it("waits for the bounded acknowledgement before returning", async () => {
+    const { pi, tools } = createPi();
+    let resolveCancel: ((result: WatcherCancelResult) => void) | null = null;
+    const cancelGeneration = vi
+      .fn()
+      .mockImplementation(
+        () => new Promise<WatcherCancelResult>((resolve) => (resolveCancel = resolve)),
+      );
+    const controller = new AbortController();
+    const verifyRequest = vi.fn(
+      async (
+        _config: unknown,
+        _request: unknown,
+        _fingerprint: unknown,
+        _signal: unknown,
+        onGeneration: ((generation: number) => void) | undefined,
+      ) => {
+        onGeneration?.(7);
+        controller.abort();
+        return abortedVerification();
+      },
+    );
+    registerTools(pi as never, createDeps({ verifyRequest, cancelGeneration }));
+    const tool = registeredTool(tools, "watcher_verify")!;
+
+    const pending = tool.execute("1", {}, controller.signal, undefined, trustedCtx());
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    const releaseCancel = (result: WatcherCancelResult): void => {
+      if (resolveCancel !== null) resolveCancel(result);
+    };
+    releaseCancel({ outcome: "cancelled", generation: 7, message: null });
+
+    await expect(pending).rejects.toThrow("ABORTED gen=7 target=lint cleanup=cancelled");
+  });
+
+  it("ignores repeated aborts without double-cancelling", async () => {
+    const { pi, tools } = createPi();
+    const cancelGeneration = vi
+      .fn()
+      .mockResolvedValue({ outcome: "cancelled", generation: 7, message: null });
+    const controller = new AbortController();
+    const verifyRequest = vi.fn(
+      async (
+        _config: unknown,
+        _request: unknown,
+        _fingerprint: unknown,
+        _signal: unknown,
+        onGeneration: ((generation: number) => void) | undefined,
+      ) => {
+        onGeneration?.(7);
+        controller.abort();
+        controller.abort();
+        return abortedVerification();
+      },
+    );
+    registerTools(pi as never, createDeps({ verifyRequest, cancelGeneration }));
+    const tool = registeredTool(tools, "watcher_verify")!;
+
+    await expect(tool.execute("1", {}, controller.signal, undefined, trustedCtx())).rejects.toThrow(
+      /cleanup=cancelled/,
+    );
+    expect(cancelGeneration).toHaveBeenCalledTimes(1);
+  });
+
+  it("never sends a cancel on a clean run", async () => {
+    const { pi, tools } = createPi();
+    const cancelGeneration = vi.fn();
+    const controller = new AbortController();
+    registerTools(pi as never, createDeps({ cancelGeneration }));
+    const tool = registeredTool(tools, "watcher_verify")!;
+
+    const result = (await tool.execute(
+      "1",
+      {},
+      controller.signal,
+      undefined,
+      trustedCtx(),
+    )) as ToolResult;
+
+    expect(result.content[0]!.text).toBe("PASS gen=7 target=lint duration=42ms fingerprint=abc123");
+    expect(cancelGeneration).not.toHaveBeenCalled();
+    controller.abort();
+  });
+});
+
 describe("watcher_verify", () => {
   it("returns the compact final result with a stable fingerprint", async () => {
     const { pi, tools } = createPi();
@@ -565,6 +872,7 @@ describe("watcher_verify", () => {
       { target: "@agent-final", matchMode: "exact", timeoutMs: 120_000 },
       expect.any(Function),
       undefined,
+      expect.any(Function),
     );
   });
 

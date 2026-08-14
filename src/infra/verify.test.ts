@@ -46,16 +46,19 @@ async function withSocketServer(
 }
 
 describe("createAtomicVerifyPort", () => {
+  const scheduleAck = `${JSON.stringify({ jsonrpc: "2.0", id: "run", result: { runId: 7 } })}\n`;
+
   test("returns a terminal outcome for the atomic run response", async () => {
     await withSocketServer(
       (request, socket) => {
         assert.match(request.toString(), /"wait":true/);
         assert.match(request.toString(), /lint/);
+        socket.write(scheduleAck);
         socket.end(
           `${JSON.stringify({
             jsonrpc: "2.0",
-            id: "run",
-            result: { runId: 7, snapshot: SNAPSHOT },
+            method: "runComplete",
+            params: { runId: 7, snapshot: SNAPSHOT },
           })}\n`,
         );
       },
@@ -72,14 +75,63 @@ describe("createAtomicVerifyPort", () => {
     );
   });
 
-  test("reports restart when the snapshot instance differs from the negotiated one", async () => {
+  test("reports the scheduled generation through onSchedule before the terminal", async () => {
     await withSocketServer(
       (_request, socket) => {
+        socket.write(scheduleAck);
         socket.end(
           `${JSON.stringify({
             jsonrpc: "2.0",
-            id: "run",
-            result: {
+            method: "runComplete",
+            params: { runId: 7, snapshot: SNAPSHOT },
+          })}\n`,
+        );
+      },
+      async (socketPath) => {
+        const scheduled: number[] = [];
+        const port = createAtomicVerifyPort(socketPath, "fz-7f3a");
+        const outcome = await port.runAndAwait({
+          target: "lint",
+          timeoutMs: 500,
+          onSchedule: (runId) => scheduled.push(runId),
+        });
+        assert.deepEqual(scheduled, [7]);
+        assert.equal(outcome.kind, "terminal");
+      },
+    );
+  });
+
+  test("returns aborted promptly when the signal fires during the atomic wait", async () => {
+    await withSocketServer(
+      (_request, socket) => {
+        socket.write(scheduleAck);
+        // Run never completes; the abort must interrupt the wait.
+      },
+      async (socketPath) => {
+        const controller = new AbortController();
+        const port = createAtomicVerifyPort(socketPath, "fz-7f3a");
+        const outcomePromise = port.runAndAwait({
+          target: "lint",
+          timeoutMs: 5_000,
+          signal: controller.signal,
+        });
+        await new Promise((resolve) => setTimeout(resolve, 30));
+        controller.abort();
+        const outcome = await outcomePromise;
+        assert.equal(outcome.kind, "aborted");
+      },
+    );
+  });
+
+  test("reports restart when the snapshot instance differs from the negotiated one", async () => {
+    await withSocketServer(
+      (_request, socket) => {
+        socket.write(scheduleAck);
+        socket.end(
+          `${JSON.stringify({
+            jsonrpc: "2.0",
+            method: "runComplete",
+            params: {
               runId: 7,
               snapshot: { ...SNAPSHOT, instance: { ...SNAPSHOT.instance, token: "fz-9b21" } },
             },
@@ -169,7 +221,7 @@ describe("createAtomicVerifyPort", () => {
           `${JSON.stringify({
             jsonrpc: "2.0",
             id: "run",
-            result: { runId: "7", snapshot: SNAPSHOT },
+            result: { runId: "7" },
           })}\n`,
         );
       },
@@ -220,6 +272,18 @@ describe("createLegacyVerifyPort", () => {
     assert.equal(outcome.generation, 7);
     assert.equal(outcome.source, "polled");
     assert.equal(outcome.snapshot, null);
+  });
+
+  test("reports the scheduled generation through onSchedule on the polled path", async () => {
+    const scheduled: number[] = [];
+    const port = portWith({});
+    const outcome = await port.runAndAwait({
+      target: "lint",
+      timeoutMs: 500,
+      onSchedule: (runId) => scheduled.push(runId),
+    });
+    assert.deepEqual(scheduled, [7]);
+    assert.equal(outcome.kind, "terminal");
   });
 
   test("maps a superseded run to the explicit reason", async () => {

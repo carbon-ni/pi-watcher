@@ -14,6 +14,11 @@ import {
   type WatcherOutputRequest,
   type WatcherOutputResult,
 } from "./domain/output.js";
+import {
+  formatCancellation,
+  cancellationReport,
+  type WatcherCancelResult,
+} from "./domain/cancel.js";
 import type { RequireTrustedConfig } from "./trusted-config.js";
 import type { Exec } from "./infra/fingerprint.js";
 import type { FunzzyConfig } from "./infra/config.js";
@@ -39,6 +44,7 @@ export interface ToolDeps {
     request: WatcherVerifyRequest,
     fingerprint: () => Promise<string>,
     signal?: AbortSignal,
+    onGeneration?: (generation: number) => void,
   ) => Promise<WatcherVerification>;
   worktreeFingerprint: (cwd: string, exec: Exec) => Promise<string>;
   createObservePort: (config: FunzzyConfig) => Promise<ObserverPort>;
@@ -52,6 +58,12 @@ export interface ToolDeps {
     request: WatcherOutputRequest,
     signal?: AbortSignal,
   ) => Promise<WatcherOutputResult>;
+  /** Compare-and-cancel an exact generation with a bounded acknowledgement wait. */
+  cancelGeneration: (
+    config: FunzzyConfig,
+    generation: number,
+    timeoutMs: number,
+  ) => Promise<WatcherCancelResult>;
 }
 
 export function registerTools(pi: ExtensionAPI, deps: ToolDeps): void {
@@ -262,6 +274,37 @@ export function registerTools(pi: ExtensionAPI, deps: ToolDeps): void {
   });
 
   pi.registerTool({
+    name: "watcher_cancel",
+    label: "Watcher Cancel",
+    description:
+      "Cancel the exact Funzzy generation (compare-and-cancel); stale requests never affect newer runs",
+    promptSnippet: "Cancel an exact Funzzy generation by identity",
+    promptGuidelines: [
+      "Call watcher_cancel with the exact generation from watcher_observe or watcher_verify to stop a running generation and its descendants.",
+      "A stale generation is a safe no-op: the server only cancels when the generation and watcher instance still match.",
+    ],
+    parameters: Type.Object({
+      generation: Type.Integer({
+        minimum: 0,
+        description: "Exact Funzzy generation to cancel",
+      }),
+      timeoutSeconds: Type.Optional(Type.Integer({ minimum: 1, maximum: 60 })),
+    }),
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const config = await deps.requireTrustedConfig(ctx);
+      const result = await deps.cancelGeneration(
+        config,
+        params.generation,
+        (params.timeoutSeconds ?? 3) * 1_000,
+      );
+      return {
+        content: [{ type: "text", text: formatCancellation(result) }],
+        details: result,
+      };
+    },
+  });
+
+  pi.registerTool({
     name: "watcher_verify",
     label: "Watcher Verify",
     description:
@@ -304,18 +347,53 @@ export function registerTools(pi: ExtensionAPI, deps: ToolDeps): void {
         deps.worktreeFingerprint(ctx.cwd, (command, args, options) =>
           pi.exec(command, args, { ...options, signal }),
         );
-      const verification = await deps.verifyRequest(
-        config,
-        {
-          target: selection.target.name,
-          matchMode,
-          timeoutMs: (params.timeoutSeconds ?? 120) * 1_000,
-        },
-        fingerprint,
-        signal,
-      );
 
-      if (verification.reason !== "passed") throw new Error(formatVerification(verification));
+      // Cancellation effect: record the exact run generation as soon as the
+      // port knows it, then send compare-and-cancel on abort. Observation-only
+      // tools never reach this; the effect only fires after run identity is
+      // known, and a stale generation is a safe no-op server-side.
+      const CANCEL_ACK_TIMEOUT_MS = 3_000;
+      let generation: number | null = null;
+      let cancelPromise: Promise<WatcherCancelResult> | null = null;
+      let abortListener: (() => void) | null = null;
+      const armCancel = (): void => {
+        if (cancelPromise !== null || generation === null) return;
+        cancelPromise = deps.cancelGeneration(config, generation, CANCEL_ACK_TIMEOUT_MS);
+      };
+      if (signal !== undefined) {
+        abortListener = () => armCancel();
+        signal.addEventListener("abort", abortListener, { once: true });
+      }
+
+      let verification;
+      try {
+        verification = await deps.verifyRequest(
+          config,
+          {
+            target: selection.target.name,
+            matchMode,
+            timeoutMs: (params.timeoutSeconds ?? 120) * 1_000,
+          },
+          fingerprint,
+          signal,
+          (runId) => {
+            generation = runId;
+            armCancel();
+          },
+        );
+      } finally {
+        if (abortListener !== null) signal?.removeEventListener("abort", abortListener);
+      }
+
+      if (verification.reason !== "passed") {
+        let cancelReport: string | null = null;
+        if (cancelPromise !== null) {
+          cancelReport = await resolveCancellation(cancelPromise);
+        }
+        const needsReport = verification.reason === "aborted" || cancelReport !== null;
+        const cleanup = needsReport ? ` ${cancelReport ?? "cleanup=none"}` : "";
+        throw new Error(`${formatVerification(verification)}${cleanup}`);
+      }
 
       return {
         content: [{ type: "text", text: formatVerification(verification) }],
@@ -323,4 +401,8 @@ export function registerTools(pi: ExtensionAPI, deps: ToolDeps): void {
       };
     },
   });
+}
+
+async function resolveCancellation(promise: Promise<WatcherCancelResult>): Promise<string> {
+  return cancellationReport(await promise);
 }

@@ -23,6 +23,8 @@ export interface AtomicRunRequest {
   target: string;
   timeoutMs: number;
   signal?: AbortSignal;
+  /** Fires as soon as the exact run generation is known (cancel arming). */
+  onSchedule?: (generation: number) => void;
 }
 
 export type AtomicRunOutcome =
@@ -47,6 +49,8 @@ export interface VerifiedRunDeps {
   port: VerifyPort;
   fingerprint: () => Promise<string>;
   signal?: AbortSignal;
+  /** Reported as soon as the port knows the exact run generation. */
+  onGeneration?: (generation: number) => void;
   /** Bounded supersede retries; the default of 2 keeps cost explicit. */
   maxSupersededRetries?: number;
 }
@@ -82,6 +86,7 @@ export async function requestVerifiedRun(
       target: request.target,
       timeoutMs,
       signal: deps.signal,
+      onSchedule: (generation) => deps.onGeneration?.(generation),
     });
     attemptCount += 1;
 

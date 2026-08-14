@@ -4,7 +4,7 @@ Owns concrete external adapters used by composition root and application behavio
 
 ## Modules and seams
 
-- `client.ts`: JSON-RPC 2.0 over Funzzy Unix control socket; status reads and output retrieval may retry interrupted transport, run requests must not be retried after connection. `requestOutput` maps unknown generation/task RPC errors to domain errors and cancels on AbortSignal.
+- `client.ts`: JSON-RPC 2.0 over Funzzy Unix control socket; status reads and output retrieval may retry interrupted transport, run requests must not be retried after connection. `requestOutput` maps unknown generation/task RPC errors to domain errors and cancels on AbortSignal. Atomic runs read the schedule acknowledgement then a `runComplete` notification; `requestCancel` sends compare-and-cancel with generation + instance token.
 - `config.ts`: reads `.watch.yaml`/`.watch.yml` and resolves `on.socket` from project root.
 - `fingerprint.ts`: combines tracked Git patch and sorted untracked contents into worktree identity.
 - `ownership.ts`: atomically persists automatic and pinned responder state beside socket.

@@ -39,7 +39,7 @@
     "build": "npm run typecheck",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
-    "format": "prettier --check .",
+    "format": "node scripts/format-check.mjs",
     "format:write": "prettier --write .",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",

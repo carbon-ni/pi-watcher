@@ -98,12 +98,21 @@ describe.skipIf(!binaryAvailable)("real watcher binary (legacy fallback)", () =>
       git(["add", "-A"]);
       git(["commit", "-qm", "base"]);
 
+      let fzzStderr = "";
       fzz = spawn(BIN, ["-c", ".watch.yaml"], { cwd: dir, stdio: ["ignore", "ignore", "pipe"] });
+      fzz.stderr?.on("data", (chunk: Buffer) => {
+        fzzStderr += chunk.toString("utf8");
+      });
       const socketPath = join(dir, ".tmp/funzzy.sock");
+      // Bounded, event-driven: a concurrently-rebuilt binary may take a moment
+      // to come up; failure carries the watcher stderr for diagnosis.
       for (let i = 0; i < 100 && !existsSync(socketPath); i += 1) {
         await new Promise((resolve) => setTimeout(resolve, 100));
       }
       expect(existsSync(socketPath)).toBe(true);
+      if (fzz.exitCode !== null) {
+        throw new Error(`fzz exited early (${fzz.exitCode}): ${fzzStderr}`);
+      }
 
       const { pi, tools, handlers } = createPi();
       funzzyStatus(pi as never);

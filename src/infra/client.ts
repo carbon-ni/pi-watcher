@@ -12,6 +12,14 @@ import {
 } from "../domain/capabilities.js";
 import { decodeAtomicRunResult, type AtomicRunResult } from "../domain/verification.js";
 import {
+  boundOutputLines,
+  decodeWatcherOutput,
+  WatcherOutputNotFoundError,
+  WatcherOutputTaskNotFoundError,
+  type WatcherOutputRequest,
+  type WatcherOutputResult,
+} from "../domain/output.js";
+import {
   decodeWatcherRun,
   decodeWatcherStatus,
   decodeWatcherTargets,
@@ -103,6 +111,52 @@ export function requestRunAtomic(
   );
 }
 
+/**
+ * Retrieve bounded retained output for an exact generation (agreed additive
+ * contract, `src/domain/fixtures/output.json`). Read-only: interrupted
+ * transport may be retried. RPC errors map to actionable domain errors, and
+ * an AbortSignal cancels the request without leaving a socket behind.
+ */
+export async function requestOutput(
+  socketPath: string,
+  request: WatcherOutputRequest,
+  timeoutMs = 10_000,
+  signal?: AbortSignal,
+): Promise<WatcherOutputResult> {
+  try {
+    return await sendRequest(
+      socketPath,
+      {
+        jsonrpc: "2.0",
+        id: "output",
+        method: "output",
+        params: {
+          generation: request.generation,
+          ...(request.task === null || request.task === undefined ? {} : { task: request.task }),
+          ...(request.stream === null || request.stream === undefined
+            ? {}
+            : { stream: request.stream }),
+          ...(request.full === undefined ? {} : { full: request.full }),
+          ...(request.tail === undefined ? {} : { tail: request.tail }),
+        },
+      },
+      timeoutMs,
+      true,
+      (value) => boundOutputLines(decodeWatcherOutput(value), request),
+      signal,
+      "Funzzy output retrieval was cancelled",
+    );
+  } catch (error) {
+    if (error instanceof FunzzyRpcError) {
+      if (error.code === -32010) throw new WatcherOutputNotFoundError(request.generation);
+      if (error.code === -32011 && request.task) {
+        throw new WatcherOutputTaskNotFoundError(request.generation, request.task);
+      }
+    }
+    throw error;
+  }
+}
+
 export function queryStatus(socketPath: string, timeoutMs = 1_000): Promise<FunzzyStatus> {
   return sendRequest(
     socketPath,
@@ -143,12 +197,15 @@ async function sendRequest<T>(
   timeoutMs: number,
   retryInterrupted: boolean,
   decode: (value: unknown) => T,
+  signal?: AbortSignal,
+  cancelMessage = "Funzzy request was cancelled",
 ): Promise<T> {
   const deadline = Date.now() + timeoutMs;
   let lastConnectionError: Error | undefined;
   let retries = 0;
 
   while (Date.now() < deadline) {
+    if (signal?.aborted) throw new Error(cancelMessage);
     try {
       const result = await sendRequestOnce<T>(
         socketPath,
@@ -156,6 +213,8 @@ async function sendRequest<T>(
         Math.max(1, deadline - Date.now()),
         retryInterrupted,
         decode,
+        signal,
+        cancelMessage,
       );
       if (retries > 0) debugLog(`connected to ${socketPath} after ${retries} retries`);
       return result;
@@ -179,6 +238,8 @@ function sendRequestOnce<T>(
   timeoutMs: number,
   retryInterrupted: boolean,
   decode: (value: unknown) => T,
+  signal?: AbortSignal,
+  cancelMessage = "Funzzy request was cancelled",
 ): Promise<T> {
   return new Promise((resolve, reject) => {
     const socket = createConnection(socketPath);
@@ -186,12 +247,23 @@ function sendRequestOnce<T>(
     let settled = false;
     let connected = false;
 
+    const onAbort = (): void => {
+      fail(new Error(cancelMessage));
+    };
+
+    const cleanup = (): void => {
+      signal?.removeEventListener("abort", onAbort);
+    };
+
     const fail = (error: Error) => {
       if (settled) return;
       settled = true;
+      cleanup();
       socket.destroy();
       reject(error);
     };
+
+    signal?.addEventListener("abort", onAbort, { once: true });
 
     socket.setTimeout(timeoutMs, () =>
       fail(new FunzzyRequestTimeoutError(`Funzzy request timed out after ${timeoutMs}ms`)),
@@ -235,6 +307,7 @@ function sendRequestOnce<T>(
         if (parsed.result === undefined) throw new Error("Funzzy response has no result");
         const decoded = decode(parsed.result);
         settled = true;
+        cleanup();
         socket.end();
         resolve(decoded);
       } catch (error) {

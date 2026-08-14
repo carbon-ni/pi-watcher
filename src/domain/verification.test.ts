@@ -102,6 +102,7 @@ describe("formatVerification", () => {
     state: "passed",
     durationMs: 42,
     failures: [],
+    evidenceTruncated: false,
     pending: 0,
     supersedingRunId: null,
     attemptCount: 1,
@@ -117,6 +118,31 @@ describe("formatVerification", () => {
     expect(
       formatVerification({ ...base, reason: "failed", failures: ["cargo test exited with 1"] }),
     ).toBe("FAIL gen=7 target=lint failures=1\n- cargo test exited with 1");
+  });
+
+  it("appends a copyable retrieval hint only when evidence is truncated", () => {
+    expect(
+      formatVerification({
+        ...base,
+        reason: "failed",
+        target: "lint",
+        failures: ["boom"],
+        evidenceTruncated: true,
+      }),
+    ).toBe(
+      "FAIL gen=7 target=lint failures=1\n- boom\nnext: watcher_output generation=7 task=lint",
+    );
+  });
+
+  it("omits the retrieval hint when evidence is complete", () => {
+    const text = formatVerification({
+      ...base,
+      reason: "failed",
+      failures: ["boom"],
+      evidenceTruncated: false,
+    });
+
+    expect(text).not.toContain("watcher_output");
   });
 
   it("renders explicit non-terminal reasons", () => {

@@ -1,0 +1,10 @@
+{
+  "generation": 7,
+  "task": "lint",
+  "stream": "stdout",
+  "observedBytes": 8192,
+  "retainedBytes": 4096,
+  "evicted": false,
+  "truncated": true,
+  "lines": ["failure: boom", "  at src/main.rs:12"]
+}

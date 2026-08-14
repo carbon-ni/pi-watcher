@@ -181,8 +181,15 @@ export async function requestVerifiedRun(
     state,
     durationMs,
     failures: boundEvidence(failures),
+    evidenceTruncated: isEvidenceTruncated(failures),
     pending,
     supersedingRunId,
     attemptCount,
   };
+}
+
+/** True when the bounded tail cut lines or any line was shortened. */
+function isEvidenceTruncated(rawFailures: string[]): boolean {
+  const bounded = boundEvidence(rawFailures);
+  return rawFailures.join("\n").length > bounded.join("\n").length;
 }

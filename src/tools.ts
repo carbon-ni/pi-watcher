@@ -9,6 +9,11 @@ import {
   type WatcherObserveRequest,
   type WatcherObservationResult,
 } from "./domain/observation-result.js";
+import {
+  formatWatcherOutput,
+  type WatcherOutputRequest,
+  type WatcherOutputResult,
+} from "./domain/output.js";
 import type { RequireTrustedConfig } from "./trusted-config.js";
 import type { Exec } from "./infra/fingerprint.js";
 import type { FunzzyConfig } from "./infra/config.js";
@@ -42,6 +47,11 @@ export interface ToolDeps {
     request: WatcherObserveRequest,
     deps: ObserveDeps,
   ) => Promise<WatcherObservationResult>;
+  requestOutput: (
+    socketPath: string,
+    request: WatcherOutputRequest,
+    signal?: AbortSignal,
+  ) => Promise<WatcherOutputResult>;
 }
 
 export function registerTools(pi: ExtensionAPI, deps: ToolDeps): void {
@@ -190,6 +200,62 @@ export function registerTools(pi: ExtensionAPI, deps: ToolDeps): void {
 
       return {
         content: [{ type: "text", text: formatObservation(result) }],
+        details: result,
+      };
+    },
+  });
+
+  pi.registerTool({
+    name: "watcher_output",
+    label: "Watcher Output",
+    description:
+      "Retrieve bounded task output for an exact Funzzy generation; use watcher_status or watcher_observe for state, this is not a status call",
+    promptSnippet: "Retrieve bounded Funzzy task output for an exact generation",
+    promptGuidelines: [
+      "Call watcher_output only to diagnose failure evidence for an exact generation; never as a default status call.",
+      "Pass the generation from watcher_observe or watcher_verify; add task to narrow to one task and stream to stdout/stderr.",
+    ],
+    parameters: Type.Object({
+      generation: Type.Integer({
+        minimum: 0,
+        description: "Exact Funzzy generation to retrieve",
+      }),
+      task: Type.Optional(
+        Type.String({ description: "Restrict retrieval to one task name within the generation" }),
+      ),
+      stream: Type.Optional(
+        Type.Union([
+          Type.Literal("stdout", { description: "Standard output stream only" }),
+          Type.Literal("stderr", { description: "Standard error stream only" }),
+        ]),
+      ),
+      tail: Type.Optional(
+        Type.Integer({
+          minimum: 0,
+          maximum: 500,
+          description: "Last N lines to include (default 40)",
+        }),
+      ),
+      full: Type.Optional(
+        Type.Boolean({ description: "Return every retained line (still transport-bounded)" }),
+      ),
+      timeoutSeconds: Type.Optional(Type.Integer({ minimum: 1, maximum: 900 })),
+    }),
+    async execute(_toolCallId, params, signal, _onUpdate, ctx) {
+      const config = await deps.requireTrustedConfig(ctx);
+      const result = await deps.requestOutput(
+        config.socketPath,
+        {
+          generation: params.generation,
+          task: params.task ?? null,
+          stream: params.stream ?? null,
+          tail: params.tail,
+          full: params.full,
+        },
+        signal,
+      );
+      return {
+        content: [{ type: "text", text: formatWatcherOutput(result) }],
         details: result,
       };
     },

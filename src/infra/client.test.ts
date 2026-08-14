@@ -4,7 +4,8 @@ import { createServer } from "node:net";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { test } from "vitest";
-import { formatStatus, listTargets, queryStatus, requestRun } from "./client.js";
+import { formatStatus, listTargets, queryStatus, requestOutput, requestRun } from "./client.js";
+import { FunzzyDisconnectError } from "./client.js";
 
 const passed = {
   generation: 4,
@@ -265,4 +266,141 @@ test("formats compact passed and failed receipts", () => {
     formatStatus({ ...passed, state: "failed", failures: ["cargo test exited with status 1"] }),
     "FAIL gen=4 failures=1 tests=cargo test trigger=src/main.rs\n- cargo test exited with status 1",
   );
+});
+
+const outputResult = {
+  generation: 7,
+  task: "lint",
+  stream: "stdout",
+  observedBytes: 8192,
+  retainedBytes: 4096,
+  evicted: false,
+  truncated: false,
+  lines: ["line one", "line two"],
+};
+
+test("requests bounded output for an exact generation and task", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "funzzy-extension-"));
+  const socketPath = join(directory, "control.sock");
+  const server = createServer((socket) => {
+    socket.once("data", (request) => {
+      assert.match(request.toString(), /"method":"output"/);
+      assert.match(request.toString(), /"generation":7/);
+      assert.match(request.toString(), /"task":"lint"/);
+      assert.match(request.toString(), /"stream":"stdout"/);
+      assert.match(request.toString(), /"tail":2/);
+      socket.end(`${JSON.stringify({ jsonrpc: "2.0", id: "output", result: outputResult })}\n`);
+    });
+  });
+  await new Promise<void>((resolve) => server.listen(socketPath, resolve));
+
+  try {
+    const result = await requestOutput(
+      socketPath,
+      { generation: 7, task: "lint", stream: "stdout", tail: 2 },
+      500,
+    );
+    assert.equal(result.generation, 7);
+    assert.equal(result.task, "lint");
+    assert.deepEqual(result.lines, ["line one", "line two"]);
+    assert.equal(result.truncated, false);
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => (error ? reject(error) : resolve())),
+    );
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("maps an unknown generation to an actionable domain error", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "funzzy-extension-"));
+  const socketPath = join(directory, "control.sock");
+  const server = createServer((socket) => {
+    socket.once("data", () => {
+      socket.end(
+        `${JSON.stringify({ jsonrpc: "2.0", id: "output", error: { code: -32010, message: "generation output not found" } })}\n`,
+      );
+    });
+  });
+  await new Promise<void>((resolve) => server.listen(socketPath, resolve));
+
+  try {
+    await assert.rejects(
+      () => requestOutput(socketPath, { generation: 99 }, 500),
+      /Funzzy output for generation 99 is not available/,
+    );
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => (error ? reject(error) : resolve())),
+    );
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("maps an unknown task to an actionable domain error", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "funzzy-extension-"));
+  const socketPath = join(directory, "control.sock");
+  const server = createServer((socket) => {
+    socket.once("data", () => {
+      socket.end(
+        `${JSON.stringify({ jsonrpc: "2.0", id: "output", error: { code: -32011, message: "task output not found" } })}\n`,
+      );
+    });
+  });
+  await new Promise<void>((resolve) => server.listen(socketPath, resolve));
+
+  try {
+    await assert.rejects(
+      () => requestOutput(socketPath, { generation: 7, task: "nope" }, 500),
+      /Funzzy output for task "nope" in generation 7 is not available/,
+    );
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => (error ? reject(error) : resolve())),
+    );
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("fails closed with a disconnect error when the server drops the socket", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "funzzy-extension-"));
+  const socketPath = join(directory, "control.sock");
+  const server = createServer((socket) => {
+    socket.once("data", () => socket.destroy());
+  });
+  await new Promise<void>((resolve) => server.listen(socketPath, resolve));
+
+  try {
+    await assert.rejects(
+      () => requestOutput(socketPath, { generation: 7 }, 400),
+      (error: unknown) => error instanceof FunzzyDisconnectError,
+    );
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => (error ? reject(error) : resolve())),
+    );
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("aborts the retrieval promptly on AbortSignal", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "funzzy-extension-"));
+  const socketPath = join(directory, "control.sock");
+  const server = createServer((socket) => {
+    socket.once("data", () => undefined);
+  });
+  await new Promise<void>((resolve) => server.listen(socketPath, resolve));
+
+  const controller = new AbortController();
+  const request = requestOutput(socketPath, { generation: 7 }, 5_000, controller.signal);
+  controller.abort();
+
+  try {
+    await assert.rejects(request, /Funzzy output retrieval was cancelled/);
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => (error ? reject(error) : resolve())),
+    );
+    await rm(directory, { recursive: true, force: true });
+  }
 });

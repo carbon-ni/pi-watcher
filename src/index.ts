@@ -7,7 +7,14 @@ import { recordsAgentActivity } from "./domain/activity.js";
 import { createFailureNotifier } from "./domain/failure-notifier.js";
 import { renderWatcherFooter, watcherStatusColor } from "./domain/status-presentation.js";
 import { formatTargets } from "./domain/targets-presentation.js";
-import { formatStatus, listTargets, queryStatus, requestRun } from "./infra/client.js";
+import { WatcherOutputUnavailableError } from "./domain/output.js";
+import {
+  formatStatus,
+  listTargets,
+  queryStatus,
+  requestOutput as requestOutputClient,
+  requestRun,
+} from "./infra/client.js";
 import { CapabilityCache, loadCapabilities } from "./infra/capabilities.js";
 import { createPollingPort, createSubscriptionPort } from "./infra/observer.js";
 import { classifyObservationError } from "./infra/observe.js";
@@ -81,6 +88,13 @@ export default function funzzyStatus(pi: ExtensionAPI) {
     },
     classifyObservationError,
     requestObservation,
+    requestOutput: async (socketPath, request, signal) => {
+      const profile = await loadCapabilities(socketPath, capabilityCache);
+      if (!profile.features.outputRetrieval) {
+        throw new WatcherOutputUnavailableError();
+      }
+      return requestOutputClient(socketPath, request, 10_000, signal);
+    },
   });
 
   registerCommands(pi, {

@@ -57,6 +57,38 @@ beforeEach(() => {
   fingerprint.mockReset().mockResolvedValue("abc123");
 });
 
+describe("evidence bounding", () => {
+  it("flags truncated evidence when the failure tail is cut", async () => {
+    const manyFailures = Array.from({ length: 50 }, (_, index) => `failure ${index}`);
+    const { port } = createFakePort([
+      terminal({
+        snapshot: { ...SNAPSHOT, state: "failed", failures: manyFailures },
+        status: { ...STATUS, state: "failed", failures: manyFailures },
+      }),
+    ]);
+
+    const result = await requestVerifiedRun({ target: "lint" }, { port, fingerprint });
+
+    expect(result.reason).toBe("failed");
+    expect(result.failures).toHaveLength(40);
+    expect(result.evidenceTruncated).toBe(true);
+  });
+
+  it("keeps complete evidence untruncated", async () => {
+    const { port } = createFakePort([
+      terminal({
+        snapshot: { ...SNAPSHOT, state: "failed", failures: ["boom"] },
+        status: { ...STATUS, state: "failed", failures: ["boom"] },
+      }),
+    ]);
+
+    const result = await requestVerifiedRun({ target: "lint" }, { port, fingerprint });
+
+    expect(result.reason).toBe("failed");
+    expect(result.evidenceTruncated).toBe(false);
+  });
+});
+
 describe("atomic acceptance", () => {
   it("accepts green only when instance, freshness, pending, and fingerprints hold", async () => {
     const { port, calls } = createFakePort([terminal()]);

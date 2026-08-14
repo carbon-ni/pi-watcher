@@ -7,6 +7,7 @@ import { formatTargets } from "./domain/targets-presentation.js";
 import type { WatcherVerification } from "./domain/verification.js";
 import type { WatcherObservationResult } from "./domain/observation-result.js";
 import type { WatcherObservation } from "./domain/observation.js";
+import type { WatcherOutputResult } from "./domain/output.js";
 import type { WatcherStatus, WatcherTarget } from "./domain/watcher.js";
 
 const CONFIG = { socketPath: "/tmp/funzzy.sock", pollIntervalMs: 1_000 };
@@ -76,8 +77,20 @@ const OBSERVE_RESULT: WatcherObservationResult = {
   message: null,
 };
 
+const OUTPUT_RESULT: WatcherOutputResult = {
+  generation: 7,
+  task: "lint",
+  stream: "stdout",
+  observedBytes: 8192,
+  retainedBytes: 4096,
+  evicted: false,
+  truncated: false,
+  lines: ["line one", "line two"],
+};
+
 type RegisteredToolCapture = {
   name: string;
+  description: string;
   execute: (...args: unknown[]) => Promise<unknown>;
 };
 
@@ -119,6 +132,7 @@ function createDeps(overrides: Record<string, unknown> = {}) {
     state: "passed",
     durationMs: 42,
     failures: [],
+    evidenceTruncated: false,
     pending: null,
     supersedingRunId: null,
     attemptCount: 1,
@@ -139,6 +153,7 @@ function createDeps(overrides: Record<string, unknown> = {}) {
     }),
     classifyObservationError: vi.fn<(error: unknown) => "disconnect" | "unknown">(() => "unknown"),
     requestObservation: vi.fn().mockResolvedValue(OBSERVE_RESULT),
+    requestOutput: vi.fn().mockResolvedValue(OUTPUT_RESULT),
     ...overrides,
   };
 }
@@ -167,6 +182,7 @@ describe("registerTools", () => {
       "watcher_status",
       "watcher_targets",
       "watcher_observe",
+      "watcher_output",
       "watcher_verify",
     ]);
   });
@@ -415,6 +431,101 @@ describe("watcher_observe", () => {
       runTool(registeredTool(tools, "watcher_observe"), {}, trustedCtx(false)),
     ).rejects.toThrow("Funzzy project configuration is not trusted");
     expect(createObservePort).not.toHaveBeenCalled();
+  });
+});
+
+describe("watcher_output", () => {
+  it("retrieves bounded output for an exact generation with typed details", async () => {
+    const { pi, tools } = createPi();
+    registerTools(pi as never, createDeps());
+
+    const result = await runTool(
+      registeredTool(tools, "watcher_output"),
+      { generation: 7 },
+      trustedCtx(),
+    );
+
+    expect(result).toEqual({
+      content: [
+        {
+          type: "text",
+          text: "OUTPUT gen=7 task=lint stream=stdout retained=4096 observed=8192\n  line one\n  line two",
+        },
+      ],
+      details: OUTPUT_RESULT,
+    });
+  });
+
+  it("passes task, stream, tail, and full through to the client", async () => {
+    const { pi, tools } = createPi();
+    const requestOutput = vi.fn().mockResolvedValue(OUTPUT_RESULT);
+    registerTools(pi as never, createDeps({ requestOutput }));
+
+    await runTool(
+      registeredTool(tools, "watcher_output"),
+      { generation: 7, task: "lint", stream: "stderr", tail: 5, full: true },
+      trustedCtx(),
+    );
+
+    expect(requestOutput).toHaveBeenCalledWith(
+      CONFIG.socketPath,
+      { generation: 7, task: "lint", stream: "stderr", tail: 5, full: true },
+      undefined,
+    );
+  });
+
+  it("renders whole-generation identity as task=all stream=all", async () => {
+    const { pi, tools } = createPi();
+    const requestOutput = vi
+      .fn()
+      .mockResolvedValue({ ...OUTPUT_RESULT, task: null, stream: null, lines: [] });
+    registerTools(pi as never, createDeps({ requestOutput }));
+
+    const result = await runTool(
+      registeredTool(tools, "watcher_output"),
+      { generation: 7 },
+      trustedCtx(),
+    );
+
+    expect(result.content[0]!.text).toBe(
+      "OUTPUT gen=7 task=all stream=all retained=4096 observed=8192",
+    );
+  });
+
+  it("labels eviction and truncation in the text", async () => {
+    const { pi, tools } = createPi();
+    const requestOutput = vi
+      .fn()
+      .mockResolvedValue({ ...OUTPUT_RESULT, evicted: true, retainedBytes: 0, lines: [] });
+    registerTools(pi as never, createDeps({ requestOutput }));
+
+    const result = await runTool(
+      registeredTool(tools, "watcher_output"),
+      { generation: 7 },
+      trustedCtx(),
+    );
+
+    expect(result.content[0]!.text).toContain(" evicted");
+  });
+
+  it("propagates actionable retrieval errors", async () => {
+    const { pi, tools } = createPi();
+    const requestOutput = vi
+      .fn()
+      .mockRejectedValue(new Error("Funzzy output for generation 99 is not available"));
+    registerTools(pi as never, createDeps({ requestOutput }));
+
+    await expect(
+      runTool(registeredTool(tools, "watcher_output"), { generation: 99 }, trustedCtx()),
+    ).rejects.toThrow("Funzzy output for generation 99 is not available");
+  });
+
+  it("describes itself as retrieval, not a status call", () => {
+    const { pi, tools } = createPi();
+    registerTools(pi as never, createDeps());
+
+    const tool = registeredTool(tools, "watcher_output");
+    expect(tool!.description).toMatch(/not a status call/);
   });
 });
 

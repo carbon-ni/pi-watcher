@@ -95,6 +95,8 @@ export interface WatcherVerification {
   durationMs: number | null;
   /** Bounded failure evidence (see boundEvidence). */
   failures: string[];
+  /** True when boundEvidence cut evidence; retrieval hint applies. */
+  evidenceTruncated: boolean;
   pending: number | null;
   supersedingRunId: number | null;
   attemptCount: number;
@@ -130,7 +132,11 @@ export function formatVerification(verification: WatcherVerification): string {
       .map((failure) => `- ${failure}`)
       .join("\n");
     const summary = `FAIL${generation}${target} failures=${verification.failures.length}`;
-    return failures ? `${summary}\n${failures}` : summary;
+    const next =
+      verification.evidenceTruncated && verification.generation !== null
+        ? `\nnext: watcher_output generation=${verification.generation} task=${verification.target}`
+        : "";
+    return failures ? `${summary}\n${failures}${next}` : summary;
   }
   return `${verification.reason.toUpperCase()}${generation}${target}`;
 }

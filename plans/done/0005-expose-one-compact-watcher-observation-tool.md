@@ -1,7 +1,7 @@
 ---
 id: TASK-0005
 title: Expose one compact watcher observation tool
-status: todo
+status: done
 depends_on: [TASK-0002]
 priority: high
 tags: [typescript, tools, axi, status, output, tdd]

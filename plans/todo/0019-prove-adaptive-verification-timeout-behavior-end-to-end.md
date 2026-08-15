@@ -1,7 +1,7 @@
 ---
 id: TASK-0019
 title: Prove adaptive verification timeout behavior end to end
-status: todo
+status: doing
 depends_on: [TASK-0018]
 priority: high
 tags: [integration-tests, duration, verification, compatibility, performance]

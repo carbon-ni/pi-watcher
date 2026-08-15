@@ -1,7 +1,7 @@
 ---
 id: TASK-0015
 title: Implement compare-and-cancel for the exact generation
-status: todo
+status: done
 depends_on: [TASK-0014]
 priority: high
 tags: []

@@ -159,6 +159,11 @@ function createDeps(overrides: Record<string, unknown> = {}) {
     formatStatus,
     listTargets: vi.fn().mockResolvedValue(TARGETS),
     formatTargets,
+    selectVerifyTimeout: vi.fn().mockResolvedValue({
+      milliseconds: 120_000,
+      source: "default",
+      estimate: null,
+    }),
     verifyRequest: vi.fn().mockResolvedValue(verification),
     worktreeFingerprint: vi.fn().mockResolvedValue("abc123"),
     createObservePort: vi.fn().mockResolvedValue({
@@ -990,7 +995,9 @@ describe("watcher_verify cancellation effect", () => {
       trustedCtx(),
     )) as ToolResult;
 
-    expect(result.content[0]!.text).toBe("PASS gen=7 target=lint duration=42ms fingerprint=abc123");
+    expect(result.content[0]!.text).toBe(
+      "PASS gen=7 target=lint duration=42ms fingerprint=abc123 timeout=120000ms source=default",
+    );
     expect(cancelGeneration).not.toHaveBeenCalled();
     controller.abort();
   });
@@ -1006,7 +1013,7 @@ describe("watcher_verify", () => {
     expect(result.content).toEqual([
       {
         type: "text",
-        text: "PASS gen=7 target=lint duration=42ms fingerprint=abc123",
+        text: "PASS gen=7 target=lint duration=42ms fingerprint=abc123 timeout=120000ms source=default",
       },
     ]);
     expect(result.details).toMatchObject({
@@ -1054,6 +1061,32 @@ describe("watcher_verify", () => {
     expect(verifyRequest).toHaveBeenCalledWith(
       CONFIG,
       { target: "lint", matchMode: "exact", timeoutMs: 120_000, sequential: true },
+      expect.any(Function),
+      undefined,
+      expect.any(Function),
+    );
+  });
+
+  it("selects a measured timeout only after resolving the exact target", async () => {
+    const { pi, tools } = createPi();
+    const selectVerifyTimeout = vi.fn().mockResolvedValue({
+      milliseconds: 95_000,
+      source: "measured",
+      estimate: { samples: 12 },
+    });
+    const verifyRequest = vi.fn().mockResolvedValue({
+      reason: "passed",
+      fingerprint: "abc123",
+      durationMs: null,
+    });
+    registerTools(pi as never, createDeps({ selectVerifyTimeout, verifyRequest }));
+
+    await runTool(registeredTool(tools, "watcher_verify"), { target: "lint" }, trustedCtx());
+
+    expect(selectVerifyTimeout).toHaveBeenCalledWith(CONFIG, TARGETS[1], undefined);
+    expect(verifyRequest).toHaveBeenCalledWith(
+      CONFIG,
+      { target: "lint", matchMode: "exact", timeoutMs: 95_000, sequential: false },
       expect.any(Function),
       undefined,
       expect.any(Function),

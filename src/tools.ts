@@ -1,6 +1,7 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import type { WatcherStatus, WatcherTarget } from "./domain/watcher.js";
+import type { TimeoutSelection } from "./domain/timeout-selection.js";
 import type { WatcherVerification, WatcherVerifyRequest } from "./domain/verification.js";
 import { formatVerification, selectTarget } from "./domain/verification.js";
 import {
@@ -41,6 +42,11 @@ export interface ToolDeps {
   formatStatus: (status: WatcherStatus) => string;
   listTargets: (socketPath: string, timeoutMs?: number) => Promise<WatcherTarget[]>;
   formatTargets: (targets: WatcherTarget[]) => string;
+  selectVerifyTimeout: (
+    config: FunzzyConfig,
+    target: WatcherTarget,
+    explicitTimeoutMs?: number,
+  ) => Promise<TimeoutSelection>;
   verifyRequest: (
     config: FunzzyConfig,
     request: WatcherVerifyRequest,
@@ -364,6 +370,12 @@ export function registerTools(pi: ExtensionAPI, deps: ToolDeps): void {
         );
       }
 
+      const timeout = await deps.selectVerifyTimeout(
+        config,
+        selection.target,
+        params.timeoutSeconds === undefined ? undefined : params.timeoutSeconds * 1_000,
+      );
+
       const fingerprint = () =>
         deps.worktreeFingerprint(ctx.cwd, (command, args, options) =>
           pi.exec(command, args, { ...options, signal }),
@@ -393,7 +405,7 @@ export function registerTools(pi: ExtensionAPI, deps: ToolDeps): void {
           {
             target: selection.target.name,
             matchMode,
-            timeoutMs: (params.timeoutSeconds ?? 120) * 1_000,
+            timeoutMs: timeout.milliseconds,
             sequential: params.sequential ?? false,
           },
           fingerprint,
@@ -427,8 +439,13 @@ export function registerTools(pi: ExtensionAPI, deps: ToolDeps): void {
       }
 
       return {
-        content: [{ type: "text", text: formatVerification(verification) }],
-        details: verification,
+        content: [
+          {
+            type: "text",
+            text: `${formatVerification(verification)} timeout=${timeout.milliseconds}ms source=${timeout.source}`,
+          },
+        ],
+        details: { ...verification, timeout },
       };
     },
   });

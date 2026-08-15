@@ -8,6 +8,7 @@ import { recordsAgentActivity } from "./domain/activity.js";
 import { createFailureNotifier } from "./domain/failure-notifier.js";
 import { renderWatcherFooter, watcherStatusColor } from "./domain/status-presentation.js";
 import { formatTargets } from "./domain/targets-presentation.js";
+import { selectVerificationTimeout } from "./domain/timeout-selection.js";
 import { WatcherOutputUnavailableError } from "./domain/output.js";
 import type { EditCheckpoint } from "./domain/correlation.js";
 import {
@@ -112,6 +113,14 @@ export default function funzzyStatus(pi: ExtensionAPI) {
     formatStatus,
     listTargets,
     formatTargets,
+    selectVerifyTimeout: async (config, target, explicitTimeoutMs) => {
+      const profile = await loadCapabilities(config.socketPath, capabilityCache);
+      return selectVerificationTimeout({
+        explicitTimeoutMs,
+        durationEstimatesSupported: profile.features.durationEstimates,
+        estimate: target.estimate,
+      });
+    },
     verifyRequest: async (config, request, fingerprint, signal, onGeneration) => {
       const profile = await loadCapabilities(config.socketPath, capabilityCache);
       if (request.sequential && !profile.features.sequentialOverride) {

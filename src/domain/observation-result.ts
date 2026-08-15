@@ -60,6 +60,10 @@ export interface WatcherObservationResult {
   source: WatcherObservationSource;
   tasks: WatcherTaskOutcome[];
   pending: number | null;
+  /** Server-reported scheduler facts; null when not available. */
+  configuredConcurrency: number | null;
+  effectiveConcurrency: number | null;
+  concurrencySource: string | null;
   /** Bounded failure evidence tail; see truncated/evidenceLines. */
   failures: string[];
   /** True when the server cap or the requested tail cut evidence. */
@@ -126,6 +130,9 @@ export function observationResult(
     source: observation?.source ?? "subscription",
     tasks: observation?.snapshot?.tasks ?? [],
     pending: observation?.snapshot?.pending ?? null,
+    configuredConcurrency: observation?.snapshot?.configuredConcurrency ?? null,
+    effectiveConcurrency: observation?.snapshot?.effectiveConcurrency ?? null,
+    concurrencySource: observation?.snapshot?.concurrencySource ?? null,
     failures,
     truncated,
     evidenceLines: failures.length,
@@ -192,7 +199,13 @@ function formatStateLine(
     }${next}`;
   }
   const label = STATE_LABELS[result.state ?? "unknown"];
-  return `${label}${generation}${freshness}${duration}${polled}`;
+  const concurrency =
+    result.configuredConcurrency === null || result.effectiveConcurrency === null
+      ? ""
+      : ` concurrency=${result.effectiveConcurrency}/${result.configuredConcurrency}${
+          result.concurrencySource === null ? "" : ` source=${result.concurrencySource}`
+        }`;
+  return `${label}${generation}${freshness}${duration}${concurrency}${polled}`;
 }
 
 const STATE_LABELS: Record<WatcherExecutionState | "unknown", string> = {

@@ -21,6 +21,9 @@ const SNAPSHOT: WatcherCorrelatedSnapshot = {
   durationMs: null,
   failures: [],
   paths: ["src/index.ts"],
+  configuredConcurrency: 2,
+  effectiveConcurrency: 2,
+  concurrencySource: "config",
 };
 
 interface ObservationOverrides {

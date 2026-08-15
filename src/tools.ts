@@ -340,6 +340,12 @@ export function registerTools(pi: ExtensionAPI, deps: ToolDeps): void {
         ]),
       ),
       timeoutSeconds: Type.Optional(Type.Integer({ minimum: 1, maximum: 900 })),
+      sequential: Type.Optional(
+        Type.Boolean({
+          description:
+            "Run this exact generation sequentially for diagnostic comparison; default false",
+        }),
+      ),
     }),
     async execute(_toolCallId, params, signal, _onUpdate, ctx) {
       const config = await deps.requireTrustedConfig(ctx);
@@ -388,6 +394,7 @@ export function registerTools(pi: ExtensionAPI, deps: ToolDeps): void {
             target: selection.target.name,
             matchMode,
             timeoutMs: (params.timeoutSeconds ?? 120) * 1_000,
+            sequential: params.sequential ?? false,
           },
           fingerprint,
           signal,

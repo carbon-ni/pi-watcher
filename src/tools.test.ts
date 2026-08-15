@@ -70,6 +70,9 @@ const OBSERVE_RESULT: WatcherObservationResult = {
   source: "subscription",
   tasks: [],
   pending: null,
+  configuredConcurrency: null,
+  effectiveConcurrency: null,
+  concurrencySource: null,
   failures: [],
   truncated: false,
   evidenceLines: 0,
@@ -145,6 +148,9 @@ function createDeps(overrides: Record<string, unknown> = {}) {
     pending: null,
     supersedingRunId: null,
     attemptCount: 1,
+    configuredConcurrency: null,
+    effectiveConcurrency: null,
+    concurrencySource: null,
   };
   return {
     requireTrustedConfig: createRequireTrustedConfig(vi.fn().mockResolvedValue(CONFIG)),
@@ -1023,7 +1029,31 @@ describe("watcher_verify", () => {
 
     expect(verifyRequest).toHaveBeenCalledWith(
       CONFIG,
-      { target: "@agent-final", matchMode: "exact", timeoutMs: 120_000 },
+      { target: "@agent-final", matchMode: "exact", timeoutMs: 120_000, sequential: false },
+      expect.any(Function),
+      undefined,
+      expect.any(Function),
+    );
+  });
+
+  it("passes sequential comparison explicitly to verification", async () => {
+    const { pi, tools } = createPi();
+    const verifyRequest = vi.fn().mockResolvedValue({
+      reason: "passed",
+      fingerprint: "abc123",
+      durationMs: null,
+    });
+    registerTools(pi as never, createDeps({ verifyRequest }));
+
+    await runTool(
+      registeredTool(tools, "watcher_verify"),
+      { target: "lint", sequential: true },
+      trustedCtx(),
+    );
+
+    expect(verifyRequest).toHaveBeenCalledWith(
+      CONFIG,
+      { target: "lint", matchMode: "exact", timeoutMs: 120_000, sequential: true },
       expect.any(Function),
       undefined,
       expect.any(Function),

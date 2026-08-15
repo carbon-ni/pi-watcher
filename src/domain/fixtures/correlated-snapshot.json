@@ -20,5 +20,8 @@
   "freshness": "current",
   "durationMs": 42,
   "failures": [],
-  "paths": ["src/main.rs", "src/lib.rs"]
+  "paths": ["src/main.rs", "src/lib.rs"],
+  "configuredConcurrency": 2,
+  "effectiveConcurrency": 2,
+  "concurrencySource": "config"
 }

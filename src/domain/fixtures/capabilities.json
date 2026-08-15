@@ -17,6 +17,7 @@
     "subscription": true,
     "correlatedSnapshots": true,
     "outputRetrieval": true,
-    "pendingWork": true
+    "pendingWork": true,
+    "sequentialOverride": true
   }
 }

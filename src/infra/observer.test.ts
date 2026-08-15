@@ -31,6 +31,9 @@ const SNAPSHOT = {
   durationMs: 42,
   failures: [],
   paths: [],
+  configuredConcurrency: 2,
+  effectiveConcurrency: 2,
+  concurrencySource: "config",
 };
 
 async function withSocketServer(

@@ -106,11 +106,14 @@ describe("formatVerification", () => {
     pending: 0,
     supersedingRunId: null,
     attemptCount: 1,
+    configuredConcurrency: 2,
+    effectiveConcurrency: 2,
+    concurrencySource: "config",
   };
 
   it("renders a compact pass with the shortened fingerprint", () => {
     expect(formatVerification(base)).toBe(
-      "PASS gen=7 target=lint duration=42ms fingerprint=abc123def456",
+      "PASS gen=7 target=lint duration=42ms concurrency=2/2 source=config fingerprint=abc123def456",
     );
   });
 

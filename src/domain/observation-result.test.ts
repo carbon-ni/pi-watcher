@@ -24,6 +24,9 @@ const SNAPSHOT: WatcherCorrelatedSnapshot = {
   durationMs: 120,
   failures: ["boom: failed to lint", "boom: second failure"],
   paths: [],
+  configuredConcurrency: 2,
+  effectiveConcurrency: 2,
+  concurrencySource: "config",
 };
 
 const OBSERVATION: WatcherObservation = {
@@ -185,7 +188,9 @@ describe("formatObservation", () => {
       "terminal",
     );
 
-    expect(formatObservation(result)).toBe("PASS gen=7 freshness=current duration=120ms");
+    expect(formatObservation(result)).toBe(
+      "PASS gen=7 freshness=current duration=120ms concurrency=2/2 source=config",
+    );
   });
 
   it("formats a failed terminal observation with task, evidence, and next action", () => {
@@ -224,7 +229,9 @@ describe("formatObservation", () => {
       "snapshot",
     );
 
-    expect(formatObservation(result)).toBe("RUNNING gen=7 freshness=current");
+    expect(formatObservation(result)).toBe(
+      "RUNNING gen=7 freshness=current concurrency=2/2 source=config",
+    );
   });
 
   it("formats an explicit no-op state distinguishable from transport failure", () => {
@@ -253,6 +260,9 @@ describe("formatObservation", () => {
         durationMs: null,
         failures: [],
         paths: [],
+        configuredConcurrency: 2,
+        effectiveConcurrency: 2,
+        concurrencySource: "config",
       },
     };
 

@@ -34,6 +34,7 @@ export function createAtomicVerifyPort(
           request.timeoutMs,
           (runId) => request.onSchedule?.(runId),
           request.signal,
+          request.sequential,
         );
         if (request.signal?.aborted) return { kind: "aborted" };
         if (

@@ -38,6 +38,7 @@ type CapabilityFeatures = {
   correlatedSnapshots: boolean;
   outputRetrieval: boolean;
   pendingWork: boolean;
+  sequentialOverride: boolean;
 };
 
 let serverCounter = 0;
@@ -64,6 +65,7 @@ class FakeWatcherServer {
     correlatedSnapshots: true,
     outputRetrieval: true,
     pendingWork: true,
+    sequentialOverride: true,
   };
   private legacyCapabilities = false;
   private subscribers = new Set<Socket>();
@@ -409,6 +411,9 @@ class FakeWatcherServer {
       failures: this.failures,
       freshness: "current",
       paths: this.trigger === null ? [] : [this.trigger],
+      configuredConcurrency: 2,
+      effectiveConcurrency: 2,
+      concurrencySource: "config",
     };
   }
 
@@ -971,6 +976,20 @@ describe("agent watcher feedback loop (end to end)", () => {
           source: "polled",
         });
         expect(observed.content[0]!.text).toContain("(polled)");
+      } finally {
+        await h.cleanup();
+      }
+    });
+
+    it("rejects sequential verification before scheduling when unsupported", async () => {
+      const h = await createHarness();
+      try {
+        h.server.setFeatures({ sequentialOverride: false });
+
+        await expect(
+          runTool(h.tool("watcher_verify"), { target: "lint", sequential: true }, h.ctx),
+        ).rejects.toThrow("fzz run lint --sequential locally");
+        expect(h.server.calls).not.toContain("run");
       } finally {
         await h.cleanup();
       }

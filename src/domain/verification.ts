@@ -24,6 +24,8 @@ export interface WatcherVerifyRequest {
   target: string;
   matchMode?: WatcherTargetMatch;
   timeoutMs?: number;
+  /** Explicit diagnostic comparison; false preserves normal scheduler behavior. */
+  sequential?: boolean;
 }
 
 export type VerificationReason =
@@ -100,6 +102,10 @@ export interface WatcherVerification {
   pending: number | null;
   supersedingRunId: number | null;
   attemptCount: number;
+  /** Server-reported scheduler facts; null when legacy transport lacks them. */
+  configuredConcurrency: number | null;
+  effectiveConcurrency: number | null;
+  concurrencySource: string | null;
 }
 
 /** Evidence bound: never more than 40 lines nor 4000 chars reach a tool. */
@@ -124,7 +130,15 @@ export function formatVerification(verification: WatcherVerification): string {
   if (verification.reason === "passed") {
     const duration =
       verification.durationMs === null ? "" : ` duration=${verification.durationMs}ms`;
-    return `PASS${generation}${target}${duration} fingerprint=${verification.fingerprint.slice(0, 12)}`;
+    const concurrency =
+      verification.configuredConcurrency == null || verification.effectiveConcurrency == null
+        ? ""
+        : ` concurrency=${verification.effectiveConcurrency}/${verification.configuredConcurrency}${
+            verification.concurrencySource == null
+              ? ""
+              : ` source=${verification.concurrencySource}`
+          }`;
+    return `PASS${generation}${target}${duration}${concurrency} fingerprint=${verification.fingerprint.slice(0, 12)}`;
   }
   if (verification.reason === "failed") {
     const failures = verification.failures

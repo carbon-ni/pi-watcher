@@ -22,6 +22,7 @@ const negotiated = {
     correlatedSnapshots: true,
     outputRetrieval: true,
     pendingWork: true,
+    sequentialOverride: true,
   },
 };
 

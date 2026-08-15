@@ -34,6 +34,7 @@ describe("decodeWatcherCapabilities", () => {
         correlatedSnapshots: false,
         outputRetrieval: false,
         pendingWork: false,
+        sequentialOverride: false,
       },
     });
   });
@@ -52,6 +53,7 @@ describe("decodeWatcherCapabilities", () => {
       correlatedSnapshots: true,
       outputRetrieval: true,
       pendingWork: true,
+      sequentialOverride: true,
     });
   });
 
@@ -142,6 +144,9 @@ describe("decodeWatcherCorrelatedSnapshot", () => {
       durationMs: null,
       failures: [],
       paths: [],
+      configuredConcurrency: 1,
+      effectiveConcurrency: 1,
+      concurrencySource: "config",
     });
   });
 
@@ -155,6 +160,9 @@ describe("decodeWatcherCorrelatedSnapshot", () => {
       { id: "t-1", name: "test @agent-final", state: "passed", durationMs: 42 },
     ]);
     expect(snapshot.paths).toEqual(["src/main.rs", "src/lib.rs"]);
+    expect(snapshot.configuredConcurrency).toBe(2);
+    expect(snapshot.effectiveConcurrency).toBe(2);
+    expect(snapshot.concurrencySource).toBe("config");
   });
 
   it("defaults missing batch paths to an empty list", () => {

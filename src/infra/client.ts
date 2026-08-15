@@ -109,6 +109,7 @@ export async function requestRunAtomic(
   timeoutMs = 120_000,
   onSchedule?: (runId: number) => void,
   signal?: AbortSignal,
+  sequential = false,
 ): Promise<AtomicRunResult> {
   const deadline = Date.now() + timeoutMs;
   let lastConnectionError: Error | undefined;
@@ -123,6 +124,7 @@ export async function requestRunAtomic(
         Math.max(1, deadline - Date.now()),
         onSchedule,
         signal,
+        sequential,
       );
       if (retries > 0) debugLog(`connected to ${socketPath} after ${retries} retries`);
       return result;
@@ -146,6 +148,7 @@ function runAtomicOnce(
   timeoutMs: number,
   onSchedule: ((runId: number) => void) | undefined,
   signal: AbortSignal | undefined,
+  sequential: boolean,
 ): Promise<AtomicRunResult> {
   return new Promise((resolve, reject) => {
     const socket = createConnection(socketPath);
@@ -211,7 +214,12 @@ function runAtomicOnce(
     socket.once("connect", () => {
       connected = true;
       socket.write(
-        `${JSON.stringify({ jsonrpc: "2.0", id: "run", method: "run", params: { target, wait: true } })}\n`,
+        `${JSON.stringify({
+          jsonrpc: "2.0",
+          id: "run",
+          method: "run",
+          params: { target, wait: true, ...(sequential ? { sequential: true } : {}) },
+        })}\n`,
       );
     });
     socket.on("data", (chunk) => {

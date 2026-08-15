@@ -22,6 +22,8 @@ import type { WatcherExecutionState, WatcherStatus } from "../domain/watcher.js"
 export interface AtomicRunRequest {
   target: string;
   timeoutMs: number;
+  /** Explicit diagnostic override; omitted on the wire unless true. */
+  sequential?: boolean;
   signal?: AbortSignal;
   /** Fires as soon as the exact run generation is known (cancel arming). */
   onSchedule?: (generation: number) => void;
@@ -76,6 +78,9 @@ export async function requestVerifiedRun(
   let source: WatcherObservationSource = "subscription";
   let supersedingRunId: number | null = null;
   let fingerprintAfter = fingerprintBefore;
+  let configuredConcurrency: number | null = null;
+  let effectiveConcurrency: number | null = null;
+  let concurrencySource: string | null = null;
 
   while (true) {
     if (deps.signal?.aborted) {
@@ -85,6 +90,7 @@ export async function requestVerifiedRun(
     const outcome = await deps.port.runAndAwait({
       target: request.target,
       timeoutMs,
+      sequential: request.sequential ?? false,
       signal: deps.signal,
       onSchedule: (generation) => deps.onGeneration?.(generation),
     });
@@ -121,6 +127,9 @@ export async function requestVerifiedRun(
           instance = outcome.snapshot.instance;
           freshness = outcome.snapshot.freshness;
           pending = outcome.snapshot.pending;
+          configuredConcurrency = outcome.snapshot.configuredConcurrency;
+          effectiveConcurrency = outcome.snapshot.effectiveConcurrency;
+          concurrencySource = outcome.snapshot.concurrencySource;
           if (fingerprintAfter !== fingerprintBefore) {
             reason = "stale";
           } else if (outcome.snapshot.freshness === "unknown") {
@@ -190,6 +199,9 @@ export async function requestVerifiedRun(
     pending,
     supersedingRunId,
     attemptCount,
+    configuredConcurrency,
+    effectiveConcurrency,
+    concurrencySource,
   };
 }
 

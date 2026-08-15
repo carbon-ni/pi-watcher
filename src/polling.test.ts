@@ -82,6 +82,7 @@ function createDeps(overrides: Partial<Deps> = {}): Deps {
           correlatedSnapshots: false,
           outputRetrieval: false,
           pendingWork: false,
+          sequentialOverride: false,
         },
       }),
     invalidateCapabilities: vi.fn(),
@@ -440,6 +441,9 @@ describe("edit correlation checkpoints", () => {
             durationMs: 42,
             failures: [],
             paths: [],
+            configuredConcurrency: 2,
+            effectiveConcurrency: 2,
+            concurrencySource: "config",
           },
         };
       },

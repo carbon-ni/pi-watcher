@@ -17,6 +17,9 @@ const SNAPSHOT: WatcherCorrelatedSnapshot = {
   durationMs: 42,
   failures: [],
   paths: [],
+  configuredConcurrency: 2,
+  effectiveConcurrency: 2,
+  concurrencySource: "config",
 };
 
 const STATUS: WatcherStatus = {

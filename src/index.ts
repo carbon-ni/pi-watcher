@@ -114,6 +114,11 @@ export default function funzzyStatus(pi: ExtensionAPI) {
     formatTargets,
     verifyRequest: async (config, request, fingerprint, signal, onGeneration) => {
       const profile = await loadCapabilities(config.socketPath, capabilityCache);
+      if (request.sequential && !profile.features.sequentialOverride) {
+        throw new Error(
+          `Funzzy watcher does not support sequential verification; run fzz run ${request.target} --sequential locally`,
+        );
+      }
       const port =
         profile.features.atomicAwait && profile.features.correlatedSnapshots
           ? createAtomicVerifyPort(config.socketPath, profile.instance.token)

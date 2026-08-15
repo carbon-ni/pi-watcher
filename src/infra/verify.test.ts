@@ -52,6 +52,7 @@ describe("createAtomicVerifyPort", () => {
     await withSocketServer(
       (request, socket) => {
         assert.match(request.toString(), /"wait":true/);
+        assert.doesNotMatch(request.toString(), /"sequential"/);
         assert.match(request.toString(), /lint/);
         socket.write(scheduleAck);
         socket.end(
@@ -71,6 +72,31 @@ describe("createAtomicVerifyPort", () => {
         assert.equal(outcome.source, "subscription");
         assert.equal(outcome.status.state, "passed");
         assert.equal(outcome.snapshot?.instance.token, "fz-7f3a");
+      },
+    );
+  });
+
+  test("sends the explicit sequential override", async () => {
+    await withSocketServer(
+      (request, socket) => {
+        assert.match(request.toString(), /"sequential":true/);
+        socket.write(scheduleAck);
+        socket.end(
+          `${JSON.stringify({
+            jsonrpc: "2.0",
+            method: "runComplete",
+            params: { runId: 7, snapshot: SNAPSHOT },
+          })}\n`,
+        );
+      },
+      async (socketPath) => {
+        const port = createAtomicVerifyPort(socketPath, "fz-7f3a");
+        const outcome = await port.runAndAwait({
+          target: "lint",
+          timeoutMs: 500,
+          sequential: true,
+        });
+        assert.equal(outcome.kind, "terminal");
       },
     );
   });

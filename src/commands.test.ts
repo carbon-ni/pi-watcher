@@ -70,6 +70,7 @@ vi.mock("./infra/capabilities.js", () => ({
       correlatedSnapshots: false,
       outputRetrieval: false,
       pendingWork: false,
+      sequentialOverride: false,
     },
   }),
 }));

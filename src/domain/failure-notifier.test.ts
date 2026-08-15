@@ -24,6 +24,9 @@ const SNAPSHOT: WatcherCorrelatedSnapshot = {
   durationMs: 42,
   failures: ["npm test exited with status 1"],
   paths: [],
+  configuredConcurrency: 2,
+  effectiveConcurrency: 2,
+  concurrencySource: "config",
 };
 
 function observation(overrides: Partial<WatcherObservation> = {}): WatcherObservation {

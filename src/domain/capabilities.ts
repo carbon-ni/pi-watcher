@@ -50,6 +50,8 @@ export interface WatcherFeatures {
   correlatedSnapshots: boolean;
   outputRetrieval: boolean;
   pendingWork: boolean;
+  /** Exact-generation sequential override (TASK-0073); false when absent. */
+  sequentialOverride: boolean;
 }
 
 export type WatcherCapabilitySource = "negotiated" | "legacy";
@@ -96,6 +98,12 @@ export interface WatcherCorrelatedSnapshot {
   failures: string[];
   /** Changed paths of the batch (optional; empty when unreported). */
   paths: string[];
+  /** Configured scheduler concurrency of this watcher (TASK-0073). */
+  configuredConcurrency: number;
+  /** Effective concurrency of this generation (TASK-0073). */
+  effectiveConcurrency: number;
+  /** Override source label (TASK-0073): "config" or "control". */
+  concurrencySource: string;
 }
 
 /**
@@ -117,6 +125,7 @@ export const LEGACY_CAPABILITY_PROFILE: WatcherCapabilityProfile = {
     correlatedSnapshots: false,
     outputRetrieval: false,
     pendingWork: false,
+    sequentialOverride: false,
   },
 };
 
@@ -174,6 +183,11 @@ export function decodeWatcherCorrelatedSnapshot(value: unknown): WatcherCorrelat
   const durationMs = readOptionalNullableNumber(object, "durationMs");
   const failures = readOptionalStringArray(object, "failures", "correlated snapshot");
   const paths = readOptionalStringArray(object, "paths", "correlated snapshot");
+  // Additive concurrency facts (TASK-0073): absent on legacy servers, so
+  // default to configured == effective == 1 with the "config" source.
+  const configuredConcurrency = readOptionalNullableNumber(object, "configuredConcurrency") ?? 1;
+  const effectiveConcurrency = readOptionalNullableNumber(object, "effectiveConcurrency") ?? 1;
+  const concurrencySource = readOptionalNullableString(object, "concurrencySource") ?? "config";
 
   return {
     instance,
@@ -188,6 +202,9 @@ export function decodeWatcherCorrelatedSnapshot(value: unknown): WatcherCorrelat
     durationMs,
     failures,
     paths,
+    configuredConcurrency,
+    effectiveConcurrency,
+    concurrencySource,
   };
 }
 
@@ -300,6 +317,8 @@ function readWatcherFeatures(object: Record<string, unknown>): WatcherFeatures {
     correlatedSnapshots: readFeatureFlag(features, "features.correlatedSnapshots"),
     outputRetrieval: readFeatureFlag(features, "features.outputRetrieval"),
     pendingWork: readFeatureFlag(features, "features.pendingWork"),
+    // Additive (TASK-0073): absent on legacy servers, never assumed.
+    sequentialOverride: readOptionalFeatureFlag(features, "features.sequentialOverride"),
   };
 }
 
@@ -308,6 +327,18 @@ function readFeatureFlag(object: Record<string, unknown>, field: string): boolea
   if (!(key in object)) {
     throw new WatcherProtocolError(`Funzzy capabilities response: "${field}" is required`);
   }
+  const value = object[key];
+  if (typeof value !== "boolean") {
+    throw new WatcherProtocolError(
+      `Funzzy capabilities response: "${field}" must be a boolean, got ${describeValue(value)}`,
+    );
+  }
+  return value;
+}
+
+function readOptionalFeatureFlag(object: Record<string, unknown>, field: string): boolean {
+  const key = field.split(".").at(-1) ?? field;
+  if (!(key in object)) return false;
   const value = object[key];
   if (typeof value !== "boolean") {
     throw new WatcherProtocolError(

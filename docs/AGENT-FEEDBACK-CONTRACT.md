@@ -108,7 +108,7 @@ Reverse imports are prohibited by the architecture ([ARCHITECTURE.md](ARCHITECTU
 
 ## 8. Compatibility fallback
 
-Older Funzzy protocol versions are handled by capability negotiation at session start ([TASK-0002](plans/todo/0002-negotiate-and-decode-correlated-funzzy-capabilities.md)): supported methods, fields, limits, retention, and atomic-await/subscription support are read once and cached per instance.
+Older Funzzy protocol versions are handled by capability negotiation at session start (TASK-0002, the capability negotiation workstream): supported methods, fields, limits, retention, and atomic-await/subscription support are read once and cached per instance.
 
 Fallback labels weaker guarantees explicitly — the extension never pretends equivalence:
 

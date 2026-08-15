@@ -1,7 +1,7 @@
 ---
 id: TASK-0022
 title: Negotiate exact output references and schema compatibility
-status: todo
+status: doing
 depends_on: [TASK-0002, TASK-0006]
 priority: high
 tags: [typescript, domain, capabilities, output, compatibility, tdd]

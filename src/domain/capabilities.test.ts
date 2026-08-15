@@ -27,7 +27,15 @@ describe("decodeWatcherCapabilities", () => {
       instance: { token: "fz-7f3a", startedAtEpochMs: null },
       methods: ["status", "targets", "run"],
       optionalFields: [],
-      limits: { outputRetentionBytes: 0, maxResponseBytes: 65536, maxEvidenceLines: 40 },
+      limits: {
+        outputRetentionBytes: 0,
+        maxResponseBytes: 65536,
+        maxEvidenceLines: 40,
+        outputSchemaVersion: null,
+        outputModes: [],
+        outputPageSizeMax: null,
+        outputMaxBytesEffective: null,
+      },
       features: {
         atomicAwait: false,
         subscription: false,
@@ -48,6 +56,9 @@ describe("decodeWatcherCapabilities", () => {
     expect(profile.methods).toContain("subscribe");
     expect(profile.optionalFields).toEqual(["batchId", "pending", "tasks", "paths"]);
     expect(profile.limits.outputRetentionBytes).toBe(1048576);
+    expect(profile.limits.outputSchemaVersion).toBe(2);
+    expect(profile.limits.outputModes).toEqual(["tail", "page"]);
+    expect(profile.limits.outputMaxBytesEffective).toBe(24_576);
     expect(profile.features).toEqual({
       atomicAwait: true,
       subscription: true,

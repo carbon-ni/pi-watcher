@@ -75,7 +75,15 @@ function createDeps(overrides: Partial<Deps> = {}): Deps {
         instance: { token: "", startedAtEpochMs: null },
         methods: ["status", "targets", "run"],
         optionalFields: [],
-        limits: { outputRetentionBytes: 0, maxResponseBytes: 65536, maxEvidenceLines: 40 },
+        limits: {
+          outputRetentionBytes: 0,
+          maxResponseBytes: 65536,
+          maxEvidenceLines: 40,
+          outputSchemaVersion: null,
+          outputModes: [],
+          outputPageSizeMax: null,
+          outputMaxBytesEffective: null,
+        },
         features: {
           atomicAwait: false,
           subscription: false,

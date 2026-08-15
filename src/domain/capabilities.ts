@@ -43,6 +43,11 @@ export interface WatcherLimits {
   maxResponseBytes: number;
   /** Default failure-evidence tail the server emits. */
   maxEvidenceLines: number;
+  /** Advanced output retrieval contract; null fields mean legacy boolean-only support. */
+  outputSchemaVersion: number | null;
+  outputModes: string[];
+  outputPageSizeMax: number | null;
+  outputMaxBytesEffective: number | null;
 }
 
 export interface WatcherFeatures {
@@ -121,7 +126,15 @@ export const LEGACY_CAPABILITY_PROFILE: WatcherCapabilityProfile = {
   protocolVersion: "1.0",
   schemaVersion: 1,
   instance: { token: "", startedAtEpochMs: null },
-  limits: { outputRetentionBytes: 0, maxResponseBytes: 65_536, maxEvidenceLines: 40 },
+  limits: {
+    outputRetentionBytes: 0,
+    maxResponseBytes: 65_536,
+    maxEvidenceLines: 40,
+    outputSchemaVersion: null,
+    outputModes: [],
+    outputPageSizeMax: null,
+    outputMaxBytesEffective: null,
+  },
   methods: ["status", "targets", "run"],
   optionalFields: [],
   features: {
@@ -288,6 +301,10 @@ function readWatcherLimits(object: Record<string, unknown>): WatcherLimits {
       outputRetentionBytes: 0,
       maxResponseBytes: LEGACY_CAPABILITY_PROFILE.limits.maxResponseBytes,
       maxEvidenceLines: LEGACY_CAPABILITY_PROFILE.limits.maxEvidenceLines,
+      outputSchemaVersion: null,
+      outputModes: [],
+      outputPageSizeMax: null,
+      outputMaxBytesEffective: null,
     };
   }
   const raw = object["limits"];
@@ -305,7 +322,22 @@ function readWatcherLimits(object: Record<string, unknown>): WatcherLimits {
     ),
     maxResponseBytes: readRequiredNumber(limits, "maxResponseBytes", "capabilities response"),
     maxEvidenceLines: readRequiredNumber(limits, "maxEvidenceLines", "capabilities response"),
+    outputSchemaVersion: readOptionalSafeInteger(limits, "outputSchemaVersion"),
+    outputModes: readOptionalStringArray(limits, "outputModes", "capabilities response"),
+    outputPageSizeMax: readOptionalSafeInteger(limits, "outputPageSizeMax"),
+    outputMaxBytesEffective: readOptionalSafeInteger(limits, "outputMaxBytesEffective"),
   };
+}
+
+function readOptionalSafeInteger(object: Record<string, unknown>, field: string): number | null {
+  if (!(field in object)) return null;
+  const value = object[field];
+  if (!Number.isSafeInteger(value) || (value as number) < 0) {
+    throw new WatcherProtocolError(
+      `Funzzy capabilities response: "${field}" must be a non-negative safe integer, got ${describeValue(value)}`,
+    );
+  }
+  return value as number;
 }
 
 function readWatcherFeatures(object: Record<string, unknown>): WatcherFeatures {

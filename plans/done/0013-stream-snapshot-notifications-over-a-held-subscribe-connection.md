@@ -1,7 +1,7 @@
 ---
 id: TASK-0013
 title: Stream snapshot notifications over a held subscribe connection
-status: todo
+status: done
 depends_on: [TASK-0012]
 priority: high
 tags: []

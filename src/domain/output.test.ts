@@ -60,6 +60,20 @@ describe("decodeWatcherOutput", () => {
     });
   });
 
+  it("decodes schema-2 page metadata", () => {
+    expect(
+      decodeWatcherOutput({
+        generation: 3,
+        tasks: [],
+        nextCursor: "opaque-next-page",
+        returnedBytes: 12,
+        retainedBytes: 48,
+        observedBytes: 96,
+        truncated: true,
+      }),
+    ).toMatchObject({ nextCursor: "opaque-next-page", returnedBytes: 12, truncated: true });
+  });
+
   it("accepts a whole-generation result with multiple retained tasks", async () => {
     const result = decodeWatcherOutput({
       generation: 3,

@@ -67,6 +67,13 @@ export interface WatcherOutputResult {
   generation: number;
   /** One entry per retained task (whole-generation retrieval) or one selected task. */
   tasks: WatcherTaskOutput[];
+  /** Schema-2 continuation; absent only in explicit legacy responses. */
+  nextCursor?: string | null;
+  /** Schema-2 shared response budget facts. */
+  returnedBytes?: number;
+  retainedBytes?: number;
+  observedBytes?: number;
+  truncated?: boolean;
 }
 
 /**
@@ -95,7 +102,11 @@ export function decodeWatcherOutput(value: unknown): WatcherOutputResult {
     return { id, stdout, stderr };
   });
 
-  return { generation, tasks };
+  return {
+    generation,
+    tasks,
+    ...readOptionalResponseMetadata(object),
+  };
 }
 
 /** Compact content projection used by tool content. */
@@ -152,6 +163,28 @@ export class WatcherOutputUnavailableError extends Error {
     super("Funzzy watcher does not support retained output retrieval");
     this.name = "WatcherOutputUnavailableError";
   }
+}
+
+function readOptionalResponseMetadata(
+  object: Record<string, unknown>,
+): Partial<WatcherOutputResult> {
+  const result: Partial<WatcherOutputResult> = {};
+  for (const field of ["returnedBytes", "retainedBytes", "observedBytes"] as const) {
+    if (!(field in object)) continue;
+    result[field] = readRequiredNumber(object, field, "output response");
+  }
+  if ("nextCursor" in object) {
+    const cursor = object["nextCursor"];
+    if (cursor !== null && typeof cursor !== "string") {
+      throw new WatcherProtocolError(
+        `Funzzy output response: "nextCursor" must be string or null, got ${describeValue(cursor)}`,
+      );
+    }
+    result.nextCursor = cursor;
+  }
+  if ("truncated" in object)
+    result.truncated = readRequiredBoolean(object, "truncated", "output response");
+  return result;
 }
 
 function readRequiredString(object: Record<string, unknown>, field: string, what: string): string {

@@ -18,13 +18,13 @@ Boolean output feature did not prevent old flat decoder from consuming new neste
 
 ## Acceptance criteria
 
-- [ ] Tests first decode supported output schema version, exact-instance requirement, request variants, paging support, and conservative byte limit.
-- [ ] Legacy boolean-only capability remains explicitly legacy and cannot enable advanced reference path by package-version guessing.
-- [ ] Unsupported/newer schema fails before output RPC with typed compatibility error, reload/upgrade action, and `doNotRetry` signal.
-- [ ] Domain decodes structured output reference with instance token, generation, optional exact task ID, and safe default request parameters.
+- [x] Tests first decode supported output schema version, exact-instance requirement, request variants, paging support, and conservative byte limit.
+- [x] Legacy boolean-only capability remains explicitly legacy and cannot enable advanced reference path by package-version guessing.
+- [x] Unsupported/newer schema fails before output RPC with typed compatibility error, reload/upgrade action, and `doNotRetry` signal.
+- [x] Domain decodes structured output reference with instance token, generation, optional exact task ID, and safe default request parameters.
 - [ ] Reference rejects missing/wrong-type/empty identity, unsafe budget, unknown variant, and mismatched snapshot identity.
 - [ ] Rust canonical fixtures from TASK-0079/0082 are mirrored exactly; schema drift test detects flat/nested mismatch.
-- [ ] Existing legacy fallback is explicit and cannot present evidence as current/exact.
+- [x] Existing legacy fallback is explicit and cannot present evidence as current/exact.
 
 ## Notes
 

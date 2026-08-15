@@ -290,13 +290,17 @@ export async function requestOutput(
         id: "output",
         method: "output",
         params: {
+          ...(request.instanceToken === undefined ? {} : { instanceToken: request.instanceToken }),
           generation: request.generation,
           ...(request.task === null || request.task === undefined ? {} : { task: request.task }),
           ...(request.stream === null || request.stream === undefined
             ? {}
             : { stream: request.stream }),
           ...(request.full === undefined ? {} : { full: request.full }),
+          ...(request.mode === undefined ? {} : { mode: request.mode }),
+          ...(request.cursor === undefined ? {} : { cursor: request.cursor }),
           ...(request.tail === undefined ? {} : { tail: request.tail }),
+          ...(request.maxBytes === undefined ? {} : { maxBytes: request.maxBytes }),
         },
       },
       timeoutMs,

@@ -23,6 +23,8 @@ export type WatcherOutputStream = "stdout" | "stderr";
 export const OUTPUT_STREAMS: readonly WatcherOutputStream[] = ["stdout", "stderr"] as const;
 
 export interface WatcherOutputRequest {
+  /** Required when following a schema-2 exact output reference. */
+  instanceToken?: string;
   generation: number;
   /** null = whole generation; a name narrows to one task's output. */
   task?: string | null;
@@ -30,8 +32,14 @@ export interface WatcherOutputRequest {
   stream?: WatcherOutputStream | null;
   /** Last N lines per stream; default retained tail; ignored when full is set. */
   tail?: number;
-  /** Return every retained line (still transport-bounded by the server). */
+  /** Return every retained line (legacy schema-1 only). */
   full?: boolean;
+  /** Schema-2 retrieval mode. */
+  mode?: "tail" | "page";
+  /** Opaque schema-2 continuation cursor. */
+  cursor?: string;
+  /** Schema-2 response budget, always below transport maximum. */
+  maxBytes?: number;
 }
 
 export interface WatcherStreamOutput {

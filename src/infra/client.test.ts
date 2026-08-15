@@ -313,10 +313,13 @@ test("requests bounded output for an exact generation and task", async () => {
   const server = createServer((socket) => {
     socket.once("data", (request) => {
       assert.match(request.toString(), /"method":"output"/);
+      assert.match(request.toString(), /"instanceToken":"fz-18b4"/);
       assert.match(request.toString(), /"generation":7/);
       assert.match(request.toString(), /"task":"lint"/);
       assert.match(request.toString(), /"stream":"stdout"/);
       assert.match(request.toString(), /"tail":2/);
+      assert.match(request.toString(), /"mode":"tail"/);
+      assert.match(request.toString(), /"maxBytes":48000/);
       socket.end(`${JSON.stringify({ jsonrpc: "2.0", id: "output", result: outputResult })}\n`);
     });
   });
@@ -325,7 +328,15 @@ test("requests bounded output for an exact generation and task", async () => {
   try {
     const result = await requestOutput(
       socketPath,
-      { generation: 7, task: "lint", stream: "stdout", tail: 2 },
+      {
+        instanceToken: "fz-18b4",
+        generation: 7,
+        task: "lint",
+        stream: "stdout",
+        mode: "tail",
+        tail: 2,
+        maxBytes: 48_000,
+      },
       500,
     );
     assert.equal(result.generation, 7);

@@ -1,7 +1,7 @@
 ---
 id: TASK-0014
 title: Make run wait:true return a schedule ack then a runComplete notification
-status: todo
+status: done
 depends_on: [TASK-0013]
 priority: high
 tags: []

@@ -38,6 +38,7 @@ type CapabilityFeatures = {
   correlatedSnapshots: boolean;
   outputRetrieval: boolean;
   pendingWork: boolean;
+  durationEstimates: boolean;
   sequentialOverride: boolean;
 };
 
@@ -54,17 +55,19 @@ class FakeWatcherServer {
   private commands: string[] = [];
   private durationMs: number | null = null;
   private failures: string[] = [];
-  private targets: Array<{ name: string; commands: string[] }> = [
-    { name: "@agent-final", commands: ["make all"] },
-    { name: "lint", commands: ["npm run lint"] },
-    { name: "test", commands: ["npm test"] },
-  ];
+  private targets: Array<{ name: string; commands: string[]; estimate?: Record<string, unknown> }> =
+    [
+      { name: "@agent-final", commands: ["make all"] },
+      { name: "lint", commands: ["npm run lint"] },
+      { name: "test", commands: ["npm test"] },
+    ];
   private features: CapabilityFeatures = {
     atomicAwait: true,
     subscription: true,
     correlatedSnapshots: true,
     outputRetrieval: true,
     pendingWork: true,
+    durationEstimates: true,
     sequentialOverride: true,
   };
   private legacyCapabilities = false;
@@ -133,7 +136,9 @@ class FakeWatcherServer {
     this.features = { ...this.features, ...features };
   }
 
-  setTargets(targets: Array<{ name: string; commands: string[] }>): void {
+  setTargets(
+    targets: Array<{ name: string; commands: string[]; estimate?: Record<string, unknown> }>,
+  ): void {
     this.targets = targets;
   }
 
@@ -690,6 +695,48 @@ describe("agent watcher feedback loop (end to end)", () => {
       // compact outputs stay well under a 2 KiB budget
       expect(Buffer.byteLength(baseline.content[0]!.text)).toBeLessThan(2_048);
       expect(Buffer.byteLength(verification.content[0]!.text)).toBeLessThan(2_048);
+    } finally {
+      await h.cleanup();
+    }
+  });
+
+  it("chooses a negotiated target estimate, while an explicit timeout still wins", async () => {
+    const h = await createHarness();
+    try {
+      h.server.setTargets([
+        {
+          name: "lint",
+          commands: ["npm run lint"],
+          estimate: {
+            typicalMs: 38_000,
+            upperMs: 61_000,
+            recommendedTimeoutMs: 95_000,
+            samples: 12,
+            confidence: "high",
+            source: "measured",
+          },
+        },
+      ]);
+
+      const firstRunCount = h.server.calls.filter((call) => call === "run").length;
+      const measured = runTool(h.tool("watcher_verify"), { target: "lint" }, h.ctx);
+      await h.server.waitForCallCount("run", firstRunCount + 1);
+      h.server.completeRun({ outcome: "passed", durationMs: 12 });
+      expect((await measured).details).toMatchObject({
+        timeout: { milliseconds: 95_000, source: "measured" },
+      });
+
+      const explicitRunCount = h.server.calls.filter((call) => call === "run").length;
+      const explicit = runTool(
+        h.tool("watcher_verify"),
+        { target: "lint", timeoutSeconds: 30 },
+        h.ctx,
+      );
+      await h.server.waitForCallCount("run", explicitRunCount + 1);
+      h.server.completeRun({ outcome: "passed", durationMs: 12 });
+      expect((await explicit).details).toMatchObject({
+        timeout: { milliseconds: 30_000, source: "explicit" },
+      });
     } finally {
       await h.cleanup();
     }

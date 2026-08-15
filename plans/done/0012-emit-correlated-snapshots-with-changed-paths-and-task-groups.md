@@ -1,7 +1,7 @@
 ---
 id: TASK-0012
 title: Emit correlated snapshots with changed paths and task groups
-status: doing
+status: done
 depends_on: [TASK-0011]
 priority: high
 tags: []

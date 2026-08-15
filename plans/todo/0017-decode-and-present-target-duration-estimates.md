@@ -1,7 +1,7 @@
 ---
 id: TASK-0017
 title: Decode and present target duration estimates
-status: todo
+status: doing
 depends_on: [TASK-0011]
 priority: high
 tags: [typescript, domain, protocol, duration, output, tdd]

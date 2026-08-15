@@ -1036,9 +1036,17 @@ describe("watcher_verify", () => {
 
     expect(verifyRequest).toHaveBeenCalledWith(
       CONFIG,
-      { target: "@agent-final", matchMode: "exact", timeoutMs: 120_000, sequential: false },
+      {
+        target: "@agent-final",
+        matchMode: "exact",
+        timeoutMs: 120_000,
+        timeoutSource: "default",
+        estimate: null,
+        sequential: false,
+      },
       expect.any(Function),
       undefined,
+      expect.any(Function),
       expect.any(Function),
     );
   });
@@ -1060,9 +1068,17 @@ describe("watcher_verify", () => {
 
     expect(verifyRequest).toHaveBeenCalledWith(
       CONFIG,
-      { target: "lint", matchMode: "exact", timeoutMs: 120_000, sequential: true },
+      {
+        target: "lint",
+        matchMode: "exact",
+        timeoutMs: 120_000,
+        timeoutSource: "default",
+        estimate: null,
+        sequential: true,
+      },
       expect.any(Function),
       undefined,
+      expect.any(Function),
       expect.any(Function),
     );
   });
@@ -1086,9 +1102,17 @@ describe("watcher_verify", () => {
     expect(selectVerifyTimeout).toHaveBeenCalledWith(CONFIG, TARGETS[1], undefined);
     expect(verifyRequest).toHaveBeenCalledWith(
       CONFIG,
-      { target: "lint", matchMode: "exact", timeoutMs: 95_000, sequential: false },
+      {
+        target: "lint",
+        matchMode: "exact",
+        timeoutMs: 95_000,
+        timeoutSource: "measured",
+        estimate: { samples: 12 },
+        sequential: false,
+      },
       expect.any(Function),
       undefined,
+      expect.any(Function),
       expect.any(Function),
     );
   });

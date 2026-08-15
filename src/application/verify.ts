@@ -7,6 +7,7 @@ import {
 import type { WatcherCorrelatedSnapshot, WatcherInstance } from "../domain/capabilities.js";
 import type { WatcherObservationSource } from "../domain/observation.js";
 import type { WatcherExecutionState, WatcherStatus } from "../domain/watcher.js";
+import type { VerificationProgress } from "../domain/verification.js";
 
 /**
  * Atomic verification use case (contract §4, §5).
@@ -55,6 +56,8 @@ export interface VerifiedRunDeps {
   onGeneration?: (generation: number) => void;
   /** Bounded supersede retries; the default of 2 keeps cost explicit. */
   maxSupersededRetries?: number;
+  /** In-flight elapsed-time observations; never a remaining-time prediction. */
+  onProgress?: (progress: VerificationProgress) => void;
 }
 
 export async function requestVerifiedRun(
@@ -63,8 +66,21 @@ export async function requestVerifiedRun(
 ): Promise<WatcherVerification> {
   const maxRetries = deps.maxSupersededRetries ?? 2;
   const matchMode = request.matchMode ?? "exact";
-  const timeoutMs = request.timeoutMs ?? 120_000;
   const fingerprintBefore = await deps.fingerprint();
+  const startedAt = Date.now();
+  const timeoutMs = request.timeoutMs ?? 120_000;
+  const timeoutSource = request.timeoutSource ?? "default";
+  const estimate = request.estimate ?? null;
+  let progressTimer: ReturnType<typeof setInterval> | null = null;
+  const reportProgress = (generation: number): void => {
+    deps.onProgress?.({
+      generation,
+      elapsedMs: Date.now() - startedAt,
+      timeoutMs,
+      timeoutSource,
+      estimate,
+    });
+  };
 
   let attemptCount = 0;
   let reason: VerificationReason = "unknown";
@@ -82,127 +98,135 @@ export async function requestVerifiedRun(
   let effectiveConcurrency: number | null = null;
   let concurrencySource: string | null = null;
 
-  while (true) {
-    if (deps.signal?.aborted) {
-      reason = "aborted";
+  try {
+    while (true) {
+      if (deps.signal?.aborted) {
+        reason = "aborted";
+        break;
+      }
+      const outcome = await deps.port.runAndAwait({
+        target: request.target,
+        timeoutMs,
+        sequential: request.sequential ?? false,
+        signal: deps.signal,
+        onSchedule: (generation) => {
+          deps.onGeneration?.(generation);
+          reportProgress(generation);
+          progressTimer ??= setInterval(() => reportProgress(generation), 5_000);
+        },
+      });
+      attemptCount += 1;
+
+      switch (outcome.kind) {
+        case "superseded": {
+          supersedingRunId = outcome.supersedingRunId;
+          generation = outcome.generation ?? generation;
+          if (attemptCount > maxRetries) {
+            reason = "superseded";
+            fingerprintAfter = await deps.fingerprint();
+            break;
+          }
+          // Retry only while the worktree is unchanged; otherwise the superseded
+          // outcome belongs to work the agent already moved past.
+          fingerprintAfter = await deps.fingerprint();
+          if (fingerprintAfter !== fingerprintBefore) {
+            reason = "stale";
+            break;
+          }
+          continue;
+        }
+
+        case "terminal": {
+          generation = outcome.generation;
+          state = outcome.status.state;
+          durationMs = outcome.status.durationMs;
+          failures = outcome.status.failures;
+          source = outcome.source;
+          fingerprintAfter = await deps.fingerprint();
+
+          if (outcome.snapshot !== null) {
+            instance = outcome.snapshot.instance;
+            freshness = outcome.snapshot.freshness;
+            pending = outcome.snapshot.pending;
+            configuredConcurrency = outcome.snapshot.configuredConcurrency;
+            effectiveConcurrency = outcome.snapshot.effectiveConcurrency;
+            concurrencySource = outcome.snapshot.concurrencySource;
+            if (fingerprintAfter !== fingerprintBefore) {
+              reason = "stale";
+            } else if (outcome.snapshot.freshness === "unknown") {
+              reason = "unknown";
+            } else if (outcome.snapshot.freshness !== "current" || outcome.snapshot.pending > 0) {
+              reason = "stale";
+            } else if (outcome.snapshot.state === "passed") {
+              reason = "passed";
+            } else if (outcome.snapshot.state === "failed") {
+              reason = "failed";
+            } else if (outcome.snapshot.state === "cancelled") {
+              reason = "cancelled";
+            } else {
+              reason = "unknown";
+            }
+          } else {
+            // Legacy polled fallback: no correlation fields, so guarantees are
+            // weaker and labeled, never equated with the atomic path (contract §8).
+            freshness = "polled";
+            if (fingerprintAfter !== fingerprintBefore) {
+              reason = "stale";
+            } else if (outcome.status.state === "passed") {
+              reason = "passed";
+            } else if (outcome.status.state === "failed") {
+              reason = "failed";
+            } else if (outcome.status.state === "cancelled") {
+              reason = "cancelled";
+            } else {
+              reason = "unknown";
+            }
+          }
+          break;
+        }
+
+        case "timeout":
+        case "disconnect":
+        case "restart":
+        case "cancelled": {
+          generation = outcome.generation;
+          reason = outcome.kind;
+          break;
+        }
+
+        case "aborted":
+        case "unknown": {
+          reason = outcome.kind;
+          break;
+        }
+      }
       break;
     }
-    const outcome = await deps.port.runAndAwait({
+
+    return {
+      reason,
       target: request.target,
-      timeoutMs,
-      sequential: request.sequential ?? false,
-      signal: deps.signal,
-      onSchedule: (generation) => deps.onGeneration?.(generation),
-    });
-    attemptCount += 1;
-
-    switch (outcome.kind) {
-      case "superseded": {
-        supersedingRunId = outcome.supersedingRunId;
-        generation = outcome.generation ?? generation;
-        if (attemptCount > maxRetries) {
-          reason = "superseded";
-          fingerprintAfter = await deps.fingerprint();
-          break;
-        }
-        // Retry only while the worktree is unchanged; otherwise the superseded
-        // outcome belongs to work the agent already moved past.
-        fingerprintAfter = await deps.fingerprint();
-        if (fingerprintAfter !== fingerprintBefore) {
-          reason = "stale";
-          break;
-        }
-        continue;
-      }
-
-      case "terminal": {
-        generation = outcome.generation;
-        state = outcome.status.state;
-        durationMs = outcome.status.durationMs;
-        failures = outcome.status.failures;
-        source = outcome.source;
-        fingerprintAfter = await deps.fingerprint();
-
-        if (outcome.snapshot !== null) {
-          instance = outcome.snapshot.instance;
-          freshness = outcome.snapshot.freshness;
-          pending = outcome.snapshot.pending;
-          configuredConcurrency = outcome.snapshot.configuredConcurrency;
-          effectiveConcurrency = outcome.snapshot.effectiveConcurrency;
-          concurrencySource = outcome.snapshot.concurrencySource;
-          if (fingerprintAfter !== fingerprintBefore) {
-            reason = "stale";
-          } else if (outcome.snapshot.freshness === "unknown") {
-            reason = "unknown";
-          } else if (outcome.snapshot.freshness !== "current" || outcome.snapshot.pending > 0) {
-            reason = "stale";
-          } else if (outcome.snapshot.state === "passed") {
-            reason = "passed";
-          } else if (outcome.snapshot.state === "failed") {
-            reason = "failed";
-          } else if (outcome.snapshot.state === "cancelled") {
-            reason = "cancelled";
-          } else {
-            reason = "unknown";
-          }
-        } else {
-          // Legacy polled fallback: no correlation fields, so guarantees are
-          // weaker and labeled, never equated with the atomic path (contract §8).
-          freshness = "polled";
-          if (fingerprintAfter !== fingerprintBefore) {
-            reason = "stale";
-          } else if (outcome.status.state === "passed") {
-            reason = "passed";
-          } else if (outcome.status.state === "failed") {
-            reason = "failed";
-          } else if (outcome.status.state === "cancelled") {
-            reason = "cancelled";
-          } else {
-            reason = "unknown";
-          }
-        }
-        break;
-      }
-
-      case "timeout":
-      case "disconnect":
-      case "restart":
-      case "cancelled": {
-        generation = outcome.generation;
-        reason = outcome.kind;
-        break;
-      }
-
-      case "aborted":
-      case "unknown": {
-        reason = outcome.kind;
-        break;
-      }
-    }
-    break;
+      matchMode,
+      instance,
+      generation,
+      freshness,
+      source,
+      fingerprint: fingerprintAfter,
+      fingerprintBefore,
+      state,
+      durationMs,
+      failures: boundEvidence(failures),
+      evidenceTruncated: isEvidenceTruncated(failures),
+      pending,
+      supersedingRunId,
+      attemptCount,
+      configuredConcurrency,
+      effectiveConcurrency,
+      concurrencySource,
+    };
+  } finally {
+    if (progressTimer !== null) clearInterval(progressTimer);
   }
-
-  return {
-    reason,
-    target: request.target,
-    matchMode,
-    instance,
-    generation,
-    freshness,
-    source,
-    fingerprint: fingerprintAfter,
-    fingerprintBefore,
-    state,
-    durationMs,
-    failures: boundEvidence(failures),
-    evidenceTruncated: isEvidenceTruncated(failures),
-    pending,
-    supersedingRunId,
-    attemptCount,
-    configuredConcurrency,
-    effectiveConcurrency,
-    concurrencySource,
-  };
 }
 
 /** True when the bounded tail cut lines or any line was shortened. */

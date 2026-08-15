@@ -93,6 +93,42 @@ describe("evidence bounding", () => {
   });
 });
 
+describe("verification progress", () => {
+  it("reports truthful elapsed history when the generation is scheduled", async () => {
+    const progress: Array<{ generation: number; timeoutMs: number; timeoutSource: string }> = [];
+    const port: VerifyPort = {
+      async runAndAwait(request) {
+        request.onSchedule?.(7);
+        return terminal();
+      },
+    };
+
+    await requestVerifiedRun(
+      {
+        target: "lint",
+        timeoutMs: 95_000,
+        timeoutSource: "measured",
+        estimate: {
+          typicalMs: 38_000,
+          upperMs: 61_000,
+          recommendedTimeoutMs: 95_000,
+          samples: 12,
+          confidence: "high",
+          source: "measured",
+        },
+      },
+      { port, fingerprint, onProgress: (entry) => progress.push(entry) },
+    );
+
+    expect(progress).toHaveLength(1);
+    expect(progress[0]).toMatchObject({
+      generation: 7,
+      timeoutMs: 95_000,
+      timeoutSource: "measured",
+    });
+  });
+});
+
 describe("generation reporting", () => {
   it("bridges the scheduled generation to the caller as soon as it is known", async () => {
     const generations: number[] = [];

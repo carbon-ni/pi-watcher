@@ -3,7 +3,12 @@ import { Type } from "typebox";
 import type { WatcherStatus, WatcherTarget } from "./domain/watcher.js";
 import type { TimeoutSelection } from "./domain/timeout-selection.js";
 import type { WatcherVerification, WatcherVerifyRequest } from "./domain/verification.js";
-import { formatVerification, selectTarget } from "./domain/verification.js";
+import {
+  formatVerification,
+  formatVerificationProgress,
+  selectTarget,
+  type VerificationProgress,
+} from "./domain/verification.js";
 import {
   formatObservation,
   formatObservationProgress,
@@ -53,6 +58,7 @@ export interface ToolDeps {
     fingerprint: () => Promise<string>,
     signal?: AbortSignal,
     onGeneration?: (generation: number) => void,
+    onProgress?: (progress: VerificationProgress) => void,
   ) => Promise<WatcherVerification>;
   worktreeFingerprint: (cwd: string, exec: Exec) => Promise<string>;
   createObservePort: (config: FunzzyConfig) => Promise<ObserverPort>;
@@ -353,7 +359,7 @@ export function registerTools(pi: ExtensionAPI, deps: ToolDeps): void {
         }),
       ),
     }),
-    async execute(_toolCallId, params, signal, _onUpdate, ctx) {
+    async execute(_toolCallId, params, signal, onUpdate, ctx) {
       const config = await deps.requireTrustedConfig(ctx);
       const targets = await deps.listTargets(config.socketPath);
       const requested = params.target ?? "@agent-final";
@@ -406,6 +412,8 @@ export function registerTools(pi: ExtensionAPI, deps: ToolDeps): void {
             target: selection.target.name,
             matchMode,
             timeoutMs: timeout.milliseconds,
+            timeoutSource: timeout.source,
+            estimate: timeout.estimate,
             sequential: params.sequential ?? false,
           },
           fingerprint,
@@ -416,6 +424,11 @@ export function registerTools(pi: ExtensionAPI, deps: ToolDeps): void {
             // must never receive a compare-and-cancel.
             if (signal?.aborted) armCancel();
           },
+          (progress) =>
+            onUpdate?.({
+              content: [{ type: "text", text: formatVerificationProgress(progress) }],
+              details: progress,
+            }),
         );
       } finally {
         if (abortListener !== null) signal?.removeEventListener("abort", abortListener);

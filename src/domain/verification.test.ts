@@ -5,6 +5,7 @@ import {
   boundEvidence,
   decodeAtomicRunResult,
   formatVerification,
+  formatVerificationProgress,
   selectTarget,
   WatcherProtocolError,
   type WatcherVerification,
@@ -85,6 +86,29 @@ describe("boundEvidence", () => {
 
   it("returns empty evidence unchanged", () => {
     expect(boundEvidence([])).toEqual([]);
+  });
+});
+
+describe("formatVerificationProgress", () => {
+  it("reports elapsed and historical bounds without a remaining-time prediction", () => {
+    expect(
+      formatVerificationProgress({
+        generation: 7,
+        elapsedMs: 62_000,
+        timeoutMs: 95_000,
+        timeoutSource: "measured",
+        estimate: {
+          typicalMs: 38_000,
+          upperMs: 61_000,
+          recommendedTimeoutMs: 95_000,
+          samples: 12,
+          confidence: "high",
+          source: "measured",
+        },
+      }),
+    ).toBe(
+      "RUNNING gen=7 elapsed=62s typical=38s upper=61s slower-than-history timeout=95s source=measured",
+    );
   });
 });
 

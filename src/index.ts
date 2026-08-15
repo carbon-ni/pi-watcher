@@ -121,7 +121,7 @@ export default function funzzyStatus(pi: ExtensionAPI) {
         estimate: target.estimate,
       });
     },
-    verifyRequest: async (config, request, fingerprint, signal, onGeneration) => {
+    verifyRequest: async (config, request, fingerprint, signal, onGeneration, onProgress) => {
       const profile = await loadCapabilities(config.socketPath, capabilityCache);
       if (request.sequential && !profile.features.sequentialOverride) {
         throw new Error(
@@ -137,7 +137,7 @@ export default function funzzyStatus(pi: ExtensionAPI) {
               requestRun,
               queryStatus,
             });
-      return requestVerifiedRun(request, { port, fingerprint, signal, onGeneration });
+      return requestVerifiedRun(request, { port, fingerprint, signal, onGeneration, onProgress });
     },
     worktreeFingerprint,
     createObservePort: async (config) => {

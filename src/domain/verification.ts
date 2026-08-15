@@ -8,6 +8,8 @@ import { expectObject, readRequiredNumber, WatcherProtocolError } from "./protoc
 
 export { WatcherProtocolError } from "./protocol.js";
 import type { WatcherExecutionState, WatcherTarget } from "./watcher.js";
+import type { TimeoutSource } from "./timeout-selection.js";
+import type { WatcherDurationEstimate } from "./duration-estimate.js";
 import type { WatcherObservationSource } from "./observation.js";
 
 /**
@@ -24,6 +26,8 @@ export interface WatcherVerifyRequest {
   target: string;
   matchMode?: WatcherTargetMatch;
   timeoutMs?: number;
+  timeoutSource?: TimeoutSource;
+  estimate?: WatcherDurationEstimate | null;
   /** Explicit diagnostic comparison; false preserves normal scheduler behavior. */
   sequential?: boolean;
 }
@@ -72,6 +76,10 @@ export function selectTarget(
   return { kind: "missing", candidates: [] };
 }
 
+function formatMilliseconds(milliseconds: number): string {
+  return milliseconds % 1_000 === 0 ? `${milliseconds / 1_000}s` : `${milliseconds}ms`;
+}
+
 function substringCandidates(targets: WatcherTarget[], requested: string): string[] {
   return targets
     .filter((target) => target.name.includes(requested))
@@ -80,6 +88,14 @@ function substringCandidates(targets: WatcherTarget[], requested: string): strin
 }
 
 /** One terminal verdict for a verified run, with typed evidence. */
+export interface VerificationProgress {
+  generation: number;
+  elapsedMs: number;
+  timeoutMs: number;
+  timeoutSource: TimeoutSource;
+  estimate: WatcherDurationEstimate | null;
+}
+
 export interface WatcherVerification {
   reason: VerificationReason;
   target: string;
@@ -121,6 +137,18 @@ export function boundEvidence(failures: string[], maxLines = 40, maxChars = 4_00
     if (chars >= maxChars) break;
   }
   return bounded;
+}
+
+/** Truthful in-flight projection: historical values, never remaining time. */
+export function formatVerificationProgress(progress: VerificationProgress): string {
+  const estimate = progress.estimate;
+  const history =
+    estimate === null
+      ? ""
+      : ` typical=${formatMilliseconds(estimate.typicalMs)} upper=${formatMilliseconds(estimate.upperMs)}${
+          progress.elapsedMs > estimate.upperMs ? " slower-than-history" : ""
+        }`;
+  return `RUNNING gen=${progress.generation} elapsed=${formatMilliseconds(progress.elapsedMs)}${history} timeout=${formatMilliseconds(progress.timeoutMs)} source=${progress.timeoutSource}`;
 }
 
 /** Compact content projection used by tool content and error messages. */

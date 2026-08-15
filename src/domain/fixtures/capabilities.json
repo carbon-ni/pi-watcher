@@ -10,7 +10,11 @@
   "limits": {
     "outputRetentionBytes": 1048576,
     "maxResponseBytes": 65536,
-    "maxEvidenceLines": 40
+    "maxEvidenceLines": 40,
+    "outputSchemaVersion": 2,
+    "outputModes": ["tail", "page"],
+    "outputPageSizeMax": 32768,
+    "outputMaxBytesEffective": 24576
   },
   "features": {
     "atomicAwait": true,

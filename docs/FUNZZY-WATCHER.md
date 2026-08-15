@@ -48,4 +48,12 @@ Run `/watcher-disconnect` to opt the current Pi session out of the watcher: obse
 
 The watcher remains an independent process. Status reads retry transient connection failures and interrupted responses for request timeout, then fail closed instead of reporting stale pass. Run requests are never retried after connection because they are not idempotent.
 
+## Historical verification timeouts
+
+When a negotiated watcher advertises `durationEstimates`, `watcher_targets` can show a bounded historical hint: typical duration, upper duration, recommended timeout, confidence, and sample count. It is a hint, not a deadline or freshness claim.
+
+`watcher_verify` selects timeout in this order: explicit `timeoutSeconds`, measured recommendation, configured hint, then the existing 120-second fallback. Explicit input always wins and is never silently extended. During a run, progress reports elapsed time plus historic typical/upper bounds; after the upper bound it says `slower-than-history`, never `stuck` and never predicts remaining time.
+
+Funzzy stores history locally, outside the workspace, at `${XDG_STATE_HOME:-~/.local/state}/funzzy/workspaces/<workspace-hash>/run-durations-v1.json`. It is machine-local and changes to commands, topology, environment, concurrency, or `timeout_hint` select a new history rather than reusing an old estimate. To reset history, stop Funzzy and remove that state file; the next run uses configured/default fallback until successful samples accumulate. Failed, cancelled, superseded, and timed-out runs do not contribute success samples.
+
 Set `PI_FUNZZY_DEBUG=1` before starting Pi to log socket retries and recovery to stderr. Funzzy itself logs the control socket path at startup and control-triggered target names; use `fzz --log-file <path>` to preserve those logs.

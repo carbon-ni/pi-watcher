@@ -40,6 +40,16 @@ describe("selectVerificationTimeout", () => {
     ).toMatchObject({ source: "configured", milliseconds: 95_000 });
   });
 
+  it("never reuses a parallel estimate for an explicit sequential run", () => {
+    expect(
+      selectVerificationTimeout({
+        sequential: true,
+        durationEstimatesSupported: true,
+        estimate: measured,
+      }),
+    ).toMatchObject({ milliseconds: 120_000, source: "default", estimate: null });
+  });
+
   it("falls back for unsupported, absent, or malformed estimates", () => {
     expect(
       selectVerificationTimeout({ durationEstimatesSupported: false, estimate: measured }),

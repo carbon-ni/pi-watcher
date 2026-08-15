@@ -113,12 +113,13 @@ export default function funzzyStatus(pi: ExtensionAPI) {
     formatStatus,
     listTargets,
     formatTargets,
-    selectVerifyTimeout: async (config, target, explicitTimeoutMs) => {
+    selectVerifyTimeout: async (config, target, explicitTimeoutMs, sequential) => {
       const profile = await loadCapabilities(config.socketPath, capabilityCache);
       return selectVerificationTimeout({
         explicitTimeoutMs,
         durationEstimatesSupported: profile.features.durationEstimates,
         estimate: target.estimate,
+        sequential,
       });
     },
     verifyRequest: async (config, request, fingerprint, signal, onGeneration, onProgress) => {

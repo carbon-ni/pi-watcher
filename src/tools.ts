@@ -51,6 +51,7 @@ export interface ToolDeps {
     config: FunzzyConfig,
     target: WatcherTarget,
     explicitTimeoutMs?: number,
+    sequential?: boolean,
   ) => Promise<TimeoutSelection>;
   verifyRequest: (
     config: FunzzyConfig,
@@ -380,6 +381,7 @@ export function registerTools(pi: ExtensionAPI, deps: ToolDeps): void {
         config,
         selection.target,
         params.timeoutSeconds === undefined ? undefined : params.timeoutSeconds * 1_000,
+        params.sequential ?? false,
       );
 
       const fingerprint = () =>

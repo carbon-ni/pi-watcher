@@ -1099,7 +1099,7 @@ describe("watcher_verify", () => {
 
     await runTool(registeredTool(tools, "watcher_verify"), { target: "lint" }, trustedCtx());
 
-    expect(selectVerifyTimeout).toHaveBeenCalledWith(CONFIG, TARGETS[1], undefined);
+    expect(selectVerifyTimeout).toHaveBeenCalledWith(CONFIG, TARGETS[1], undefined, false);
     expect(verifyRequest).toHaveBeenCalledWith(
       CONFIG,
       {

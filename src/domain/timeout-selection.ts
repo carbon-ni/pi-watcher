@@ -13,6 +13,8 @@ export interface TimeoutSelectionInput {
   durationEstimatesSupported?: boolean;
   estimate?: WatcherDurationEstimate;
   configuredTimeoutMs?: number;
+  /** A target-list estimate describes normal scheduling, never an override. */
+  sequential?: boolean;
 }
 
 const DEFAULT_TIMEOUT_MS = 120_000;
@@ -27,7 +29,8 @@ export function selectVerificationTimeout(input: TimeoutSelectionInput): Timeout
     };
   }
 
-  const estimate = input.durationEstimatesSupported ? input.estimate : undefined;
+  const estimate =
+    input.durationEstimatesSupported && !input.sequential ? input.estimate : undefined;
   if (estimate !== undefined && validEstimate(estimate)) {
     return {
       milliseconds: estimate.recommendedTimeoutMs,

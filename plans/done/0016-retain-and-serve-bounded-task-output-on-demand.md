@@ -1,7 +1,7 @@
 ---
 id: TASK-0016
 title: Retain and serve bounded task output on demand
-status: todo
+status: done
 depends_on: [TASK-0015]
 priority: high
 tags: []

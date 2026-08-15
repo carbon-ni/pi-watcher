@@ -34,6 +34,7 @@ describe("decodeWatcherCapabilities", () => {
         correlatedSnapshots: false,
         outputRetrieval: false,
         pendingWork: false,
+        durationEstimates: false,
         sequentialOverride: false,
       },
     });
@@ -53,6 +54,7 @@ describe("decodeWatcherCapabilities", () => {
       correlatedSnapshots: true,
       outputRetrieval: true,
       pendingWork: true,
+      durationEstimates: true,
       sequentialOverride: true,
     });
   });
@@ -165,8 +167,33 @@ describe("decodeWatcherCorrelatedSnapshot", () => {
     expect(snapshot.concurrencySource).toBe("config");
   });
 
-  it("defaults missing batch paths to an empty list", () => {
-    expect(decodeWatcherCorrelatedSnapshot(minimum).paths).toEqual([]);
+  it("decodes the optional estimate fixed at generation start", () => {
+    const snapshot = decodeWatcherCorrelatedSnapshot({
+      ...minimum,
+      estimate: {
+        typicalMs: 38_000,
+        upperMs: 61_000,
+        recommendedTimeoutMs: 95_000,
+        samples: 12,
+        confidence: "high",
+        source: "measured",
+      },
+    });
+
+    expect(snapshot.estimate).toEqual({
+      typicalMs: 38_000,
+      upperMs: 61_000,
+      recommendedTimeoutMs: 95_000,
+      samples: 12,
+      confidence: "high",
+      source: "measured",
+    });
+  });
+
+  it("defaults missing batch paths and estimate for compatibility", () => {
+    const snapshot = decodeWatcherCorrelatedSnapshot(minimum);
+    expect(snapshot.paths).toEqual([]);
+    expect(snapshot.estimate).toBeUndefined();
   });
 
   it("rejects a malformed batch field", () => {
@@ -226,6 +253,7 @@ describe("capability policy surface", () => {
     expect(LEGACY_CAPABILITY_PROFILE.features.atomicAwait).toBe(false);
     expect(LEGACY_CAPABILITY_PROFILE.features.subscription).toBe(false);
     expect(LEGACY_CAPABILITY_PROFILE.features.correlatedSnapshots).toBe(false);
+    expect(LEGACY_CAPABILITY_PROFILE.features.durationEstimates).toBe(false);
     expect(LEGACY_CAPABILITY_PROFILE.methods).toEqual(["status", "targets", "run"]);
   });
 });

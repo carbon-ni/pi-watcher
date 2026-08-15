@@ -82,6 +82,7 @@ function createDeps(overrides: Partial<Deps> = {}): Deps {
           correlatedSnapshots: false,
           outputRetrieval: false,
           pendingWork: false,
+          durationEstimates: false,
           sequentialOverride: false,
         },
       }),

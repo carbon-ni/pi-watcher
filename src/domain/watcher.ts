@@ -1,3 +1,4 @@
+import { readOptionalDurationEstimate, type WatcherDurationEstimate } from "./duration-estimate.js";
 import {
   type EXECUTION_STATES,
   describeValue,
@@ -18,6 +19,8 @@ export type WatcherExecutionState = (typeof EXECUTION_STATES)[number];
 export interface WatcherTarget {
   name: string;
   commands: string[];
+  /** Omitted when the server has no history or does not support estimates. */
+  estimate?: WatcherDurationEstimate;
 }
 
 export interface WatcherStatus {
@@ -63,9 +66,11 @@ export function decodeWatcherTargets(value: unknown): WatcherTarget[] {
 
   return value.map((entry, index) => {
     const target = expectObject(entry, `target at index ${index}`);
-    const name = readRequiredString(target, "name", `target at index ${index}`);
-    const commands = readStringArray(target, "commands", `target at index ${index}`);
-    return { name, commands };
+    const what = `target at index ${index}`;
+    const name = readRequiredString(target, "name", what);
+    const commands = readStringArray(target, "commands", what);
+    const estimate = readOptionalDurationEstimate(target, what);
+    return { name, commands, ...(estimate === null ? {} : { estimate }) };
   });
 }
 

@@ -18,4 +18,25 @@ describe("formatTargets", () => {
       "- lint: npm run lint\n- check: npm run format && make tests",
     );
   });
+
+  it("renders a useful measured estimate without exposing implementation detail", () => {
+    const targets: WatcherTarget[] = [
+      {
+        name: "check",
+        commands: ["make tests"],
+        estimate: {
+          typicalMs: 38_000,
+          upperMs: 61_000,
+          recommendedTimeoutMs: 95_000,
+          samples: 12,
+          confidence: "high",
+          source: "measured",
+        },
+      },
+    ];
+
+    expect(formatTargets(targets)).toBe(
+      "- check: make tests (estimate typical=38s upper=61s timeout=95s high n=12)",
+    );
+  });
 });

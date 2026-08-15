@@ -1,3 +1,4 @@
+import { readOptionalDurationEstimate, type WatcherDurationEstimate } from "./duration-estimate.js";
 import {
   describeValue,
   expectObject,
@@ -50,6 +51,8 @@ export interface WatcherFeatures {
   correlatedSnapshots: boolean;
   outputRetrieval: boolean;
   pendingWork: boolean;
+  /** Historical target duration hints; false when absent or legacy. */
+  durationEstimates: boolean;
   /** Exact-generation sequential override (TASK-0073); false when absent. */
   sequentialOverride: boolean;
 }
@@ -104,6 +107,8 @@ export interface WatcherCorrelatedSnapshot {
   effectiveConcurrency: number;
   /** Override source label (TASK-0073): "config" or "control". */
   concurrencySource: string;
+  /** Captured at generation start when the server has duration history. */
+  estimate?: WatcherDurationEstimate;
 }
 
 /**
@@ -125,6 +130,7 @@ export const LEGACY_CAPABILITY_PROFILE: WatcherCapabilityProfile = {
     correlatedSnapshots: false,
     outputRetrieval: false,
     pendingWork: false,
+    durationEstimates: false,
     sequentialOverride: false,
   },
 };
@@ -188,6 +194,7 @@ export function decodeWatcherCorrelatedSnapshot(value: unknown): WatcherCorrelat
   const configuredConcurrency = readOptionalNullableNumber(object, "configuredConcurrency") ?? 1;
   const effectiveConcurrency = readOptionalNullableNumber(object, "effectiveConcurrency") ?? 1;
   const concurrencySource = readOptionalNullableString(object, "concurrencySource") ?? "config";
+  const estimate = readOptionalDurationEstimate(object, "correlated snapshot");
 
   return {
     instance,
@@ -205,6 +212,7 @@ export function decodeWatcherCorrelatedSnapshot(value: unknown): WatcherCorrelat
     configuredConcurrency,
     effectiveConcurrency,
     concurrencySource,
+    ...(estimate === null ? {} : { estimate }),
   };
 }
 
@@ -317,6 +325,8 @@ function readWatcherFeatures(object: Record<string, unknown>): WatcherFeatures {
     correlatedSnapshots: readFeatureFlag(features, "features.correlatedSnapshots"),
     outputRetrieval: readFeatureFlag(features, "features.outputRetrieval"),
     pendingWork: readFeatureFlag(features, "features.pendingWork"),
+    // Additive: absent on older negotiated servers, never assumed.
+    durationEstimates: readOptionalFeatureFlag(features, "features.durationEstimates"),
     // Additive (TASK-0073): absent on legacy servers, never assumed.
     sequentialOverride: readOptionalFeatureFlag(features, "features.sequentialOverride"),
   };

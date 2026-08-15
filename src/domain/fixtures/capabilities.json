@@ -18,6 +18,7 @@
     "correlatedSnapshots": true,
     "outputRetrieval": true,
     "pendingWork": true,
+    "durationEstimates": true,
     "sequentialOverride": true
   }
 }

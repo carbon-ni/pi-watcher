@@ -1,0 +1,24 @@
+{
+  "estimate": {
+    "typicalMs": 38000,
+    "upperMs": 61000,
+    "recommendedTimeoutMs": 95000,
+    "samples": 12,
+    "confidence": "high",
+    "source": "measured"
+  },
+  "targets": [
+    {
+      "name": "@agent-final",
+      "commands": ["make verify"],
+      "estimate": {
+        "typicalMs": 38000,
+        "upperMs": 61000,
+        "recommendedTimeoutMs": 95000,
+        "samples": 12,
+        "confidence": "high",
+        "source": "measured"
+      }
+    }
+  ]
+}

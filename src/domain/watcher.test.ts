@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import durationEstimateFixture from "./fixtures/duration-estimate.json" with { type: "json" };
 import {
   decodeWatcherRun,
   decodeWatcherStatus,
@@ -102,6 +103,74 @@ describe("decodeWatcherTargets", () => {
 
   it("decodes a Rust-produced targets list", () => {
     expect(decodeWatcherTargets(rustTargetsPayload)).toEqual(rustTargetsPayload);
+  });
+
+  it("decodes optional bounded duration estimates from the Rust golden fixture", () => {
+    expect(decodeWatcherTargets(durationEstimateFixture.targets)).toEqual(
+      durationEstimateFixture.targets,
+    );
+  });
+
+  it("decodes a configured fallback estimate with no measured samples", () => {
+    expect(
+      decodeWatcherTargets([
+        {
+          name: "quick",
+          commands: ["cargo test"],
+          estimate: {
+            typicalMs: 120_000,
+            upperMs: 120_000,
+            recommendedTimeoutMs: 120_000,
+            samples: 0,
+            confidence: "none",
+            source: "configured",
+          },
+        },
+      ]),
+    ).toMatchObject([{ estimate: { source: "configured", confidence: "none", samples: 0 } }]);
+  });
+
+  it("keeps targets without estimate backward compatible", () => {
+    expect(decodeWatcherTargets([{ name: "quick", commands: ["cargo test"] }])).toEqual([
+      { name: "quick", commands: ["cargo test"] },
+    ]);
+  });
+
+  it.each([
+    ["negative duration", { ...durationEstimateFixture.estimate, typicalMs: -1 }, /safe integer/],
+    [
+      "unsafe duration",
+      { ...durationEstimateFixture.estimate, recommendedTimeoutMs: Number.MAX_SAFE_INTEGER + 1 },
+      /safe integer/,
+    ],
+    [
+      "duration above the contract cap",
+      { ...durationEstimateFixture.estimate, recommendedTimeoutMs: 900_001 },
+      /must not exceed 900000/,
+    ],
+    [
+      "inconsistent ordering",
+      { ...durationEstimateFixture.estimate, upperMs: 20_000 },
+      /typicalMs <= upperMs <= recommendedTimeoutMs/,
+    ],
+    ["inconsistent confidence", { ...durationEstimateFixture.estimate, samples: 1 }, /confidence/],
+    ["unknown source", { ...durationEstimateFixture.estimate, source: "guessed" }, /source/],
+  ])("rejects a malformed estimate: %s", (_scenario, estimate, error) => {
+    expect(() =>
+      decodeWatcherTargets([{ name: "final", commands: ["cargo test"], estimate }]),
+    ).toThrow(error);
+  });
+
+  it("ignores unknown additive estimate fields", () => {
+    expect(
+      decodeWatcherTargets([
+        {
+          name: "final",
+          commands: ["cargo test"],
+          estimate: { ...durationEstimateFixture.estimate, futureField: "ignored" },
+        },
+      ]),
+    ).toMatchObject([{ estimate: durationEstimateFixture.estimate }]);
   });
 
   it("decodes an empty targets list", () => {

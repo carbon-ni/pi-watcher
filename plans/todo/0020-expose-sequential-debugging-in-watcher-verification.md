@@ -1,7 +1,7 @@
 ---
 id: TASK-0020
 title: Expose sequential debugging in watcher verification
-status: todo
+status: doing
 depends_on: [TASK-0002, TASK-0004]
 priority: high
 tags: [typescript, tools, verification, concurrency, capabilities, tdd]

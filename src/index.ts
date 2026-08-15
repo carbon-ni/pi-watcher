@@ -10,6 +10,7 @@ import { renderWatcherFooter, watcherStatusColor } from "./domain/status-present
 import { formatTargets } from "./domain/targets-presentation.js";
 import { selectVerificationTimeout } from "./domain/timeout-selection.js";
 import { WatcherOutputUnavailableError } from "./domain/output.js";
+import { ensureOutputReferenceCompatibility } from "./domain/output-reference.js";
 import type { EditCheckpoint } from "./domain/correlation.js";
 import {
   formatStatus,
@@ -156,6 +157,7 @@ export default function funzzyStatus(pi: ExtensionAPI) {
       if (!profile.features.outputRetrieval) {
         throw new WatcherOutputUnavailableError();
       }
+      ensureOutputReferenceCompatibility(profile.limits);
       return requestOutputClient(socketPath, request, 10_000, signal);
     },
     cancelGeneration: async (config, generation, timeoutMs) => {

@@ -1,7 +1,7 @@
 ---
 id: TASK-0018
 title: Select watcher verification timeouts from measured estimates
-status: todo
+status: doing
 depends_on: [TASK-0017]
 priority: high
 tags: [typescript, application, verification, timeout, axi, tdd]

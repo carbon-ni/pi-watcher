@@ -1,9 +1,0 @@
-{
-  "instanceToken": "fz-7f3a",
-  "generation": 7,
-  "task": "lint @fast",
-  "stream": null,
-  "mode": "tail",
-  "tail": 80,
-  "maxBytes": 24576
-}

@@ -1023,7 +1023,7 @@ describe("watcher_verify", () => {
     });
   });
 
-  it("selects the exact target name by default and passes the timeout", async () => {
+  it("selects a unique target substring by default and passes the timeout", async () => {
     const { pi, tools } = createPi();
     const verifyRequest = vi.fn().mockResolvedValue({
       reason: "passed",
@@ -1038,7 +1038,7 @@ describe("watcher_verify", () => {
       CONFIG,
       {
         target: "@agent-final",
-        matchMode: "exact",
+        matchMode: "substring",
         timeoutMs: 120_000,
         timeoutSource: "default",
         estimate: null,
@@ -1070,7 +1070,7 @@ describe("watcher_verify", () => {
       CONFIG,
       {
         target: "lint",
-        matchMode: "exact",
+        matchMode: "substring",
         timeoutMs: 120_000,
         timeoutSource: "default",
         estimate: null,
@@ -1083,7 +1083,7 @@ describe("watcher_verify", () => {
     );
   });
 
-  it("selects a measured timeout only after resolving the exact target", async () => {
+  it("selects a measured timeout only after resolving the unique target", async () => {
     const { pi, tools } = createPi();
     const selectVerifyTimeout = vi.fn().mockResolvedValue({
       milliseconds: 95_000,
@@ -1104,7 +1104,7 @@ describe("watcher_verify", () => {
       CONFIG,
       {
         target: "lint",
-        matchMode: "exact",
+        matchMode: "substring",
         timeoutMs: 95_000,
         timeoutSource: "measured",
         estimate: { samples: 12 },
@@ -1149,18 +1149,13 @@ describe("watcher_verify", () => {
     );
   });
 
-  it("rejects a requested name that matches no exact target", async () => {
+  it("rejects a requested name with no target match", async () => {
     const { pi, tools } = createPi();
-    const listTargets = vi
-      .fn()
-      .mockResolvedValue([{ name: "final checks @agent-final", commands: ["make all"] }]);
-    registerTools(pi as never, createDeps({ listTargets }));
+    registerTools(pi as never, createDeps({ listTargets: vi.fn().mockResolvedValue(TARGETS) }));
 
     await expect(
-      runTool(registeredTool(tools, "watcher_verify"), {}, trustedCtx()),
-    ).rejects.toThrow(
-      'No exact Funzzy target named "@agent-final"; candidates: final checks @agent-final',
-    );
+      runTool(registeredTool(tools, "watcher_verify"), { target: "nope" }, trustedCtx()),
+    ).rejects.toThrow('No Funzzy target matching "nope"');
   });
 
   it("never picks an ambiguous substring match silently", async () => {

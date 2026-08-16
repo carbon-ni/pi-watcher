@@ -1063,7 +1063,7 @@ describe("agent watcher feedback loop (end to end)", () => {
         await h.sessionStart();
         h.server.setTargets([{ name: "lint", commands: ["npm run lint"] }]);
         await expect(runTool(h.tool("watcher_verify"), { target: "nope" }, h.ctx)).rejects.toThrow(
-          /No exact Funzzy target named "nope"/,
+          /No Funzzy target matching "nope"/,
         );
       } finally {
         await h.cleanup();

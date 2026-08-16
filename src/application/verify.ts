@@ -65,7 +65,7 @@ export async function requestVerifiedRun(
   deps: VerifiedRunDeps,
 ): Promise<WatcherVerification> {
   const maxRetries = deps.maxSupersededRetries ?? 2;
-  const matchMode = request.matchMode ?? "exact";
+  const matchMode = request.matchMode ?? "substring";
   const fingerprintBefore = await deps.fingerprint();
   const startedAt = Date.now();
   const timeoutMs = request.timeoutMs ?? 120_000;

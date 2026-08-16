@@ -339,7 +339,7 @@ export function registerTools(pi: ExtensionAPI, deps: ToolDeps): void {
       "Run the exact named Funzzy target and return its terminal result with freshness proof; use watcher_targets to discover exact names",
     promptSnippet: "Run the external Funzzy final verification gate",
     promptGuidelines: [
-      "Select targets by exact name: substring ambiguity returns candidates instead of running work.",
+      "Select one uniquely matching target substring; ambiguity returns candidates instead of running work.",
       "Accept green only when the watcher instance is continuous, the snapshot is fresh, and the worktree fingerprint is unchanged.",
     ],
     parameters: Type.Object({
@@ -364,12 +364,12 @@ export function registerTools(pi: ExtensionAPI, deps: ToolDeps): void {
       const config = await deps.requireTrustedConfig(ctx);
       const targets = await deps.listTargets(config.socketPath);
       const requested = params.target ?? "@agent-final";
-      const matchMode = params.matchMode === "substring" ? "substring" : "exact";
+      const matchMode = params.matchMode === "exact" ? "exact" : "substring";
       const selection = selectTarget(targets, requested, matchMode);
       if (selection.kind === "missing") {
         const candidates =
           selection.candidates.length > 0 ? `; candidates: ${selection.candidates.join(", ")}` : "";
-        throw new Error(`No exact Funzzy target named "${requested}"${candidates}`);
+        throw new Error(`No Funzzy target matching "${requested}"${candidates}`);
       }
       if (selection.kind === "ambiguous") {
         throw new Error(

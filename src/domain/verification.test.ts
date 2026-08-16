@@ -26,23 +26,22 @@ describe("selectTarget", () => {
     });
   });
 
-  it("reports missing with compact candidates when no exact name matches", () => {
+  it("reports ambiguity with compact candidates for ambiguous default matching", () => {
     expect(selectTarget(TARGETS, "final")).toEqual({
-      kind: "missing",
+      kind: "ambiguous",
       candidates: ["final checks @agent-final", "final checks @agent-slow"],
     });
   });
 
-  it("never picks a substring match silently in exact mode", () => {
-    // "final" is not a target name; even a unique substring must not run work.
+  it("selects a unique substring by default", () => {
     const targets = [{ name: "final checks @agent-final", commands: ["make all"] }];
     expect(selectTarget(targets, "final")).toEqual({
-      kind: "missing",
-      candidates: ["final checks @agent-final"],
+      kind: "selected",
+      target: targets[0],
     });
   });
 
-  it("selects a unique substring match when explicitly opted in", () => {
+  it("selects a unique substring when explicitly requested", () => {
     expect(selectTarget(TARGETS, "agent-slow", "substring")).toEqual({
       kind: "selected",
       target: TARGETS[2],

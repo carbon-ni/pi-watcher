@@ -13,7 +13,7 @@ import type { WatcherDurationEstimate } from "./duration-estimate.js";
 import type { WatcherObservationSource } from "./observation.js";
 
 /**
- * Verification vocabulary (contract §4, §5): exact target selection, atomic
+ * Verification vocabulary (contract §4, §5): deterministic target selection, atomic
  * run-and-await outcomes, and the acceptance reasons a tool may report.
  * Pure domain: selection never picks work implicitly, retries are bounded,
  * and weaker polling guarantees are labeled, never equated with atomic ones.
@@ -22,7 +22,7 @@ import type { WatcherObservationSource } from "./observation.js";
 export type WatcherTargetMatch = "exact" | "substring";
 
 export interface WatcherVerifyRequest {
-  /** Exact stable target name/ID by default; substring only when opted in. */
+  /** Unique target substring by default; exact mode is available when required. */
   target: string;
   matchMode?: WatcherTargetMatch;
   timeoutMs?: number;
@@ -54,13 +54,13 @@ export type TargetSelection =
 const MAX_CANDIDATES = 5;
 
 /**
- * Exact selection by default; substring matching only when explicitly opted
- * in. Ambiguity always yields candidates, never a silent pick (contract §5).
+ * Unique substring selection by default. Ambiguity always yields candidates,
+ * never a silent pick (contract §5).
  */
 export function selectTarget(
   targets: WatcherTarget[],
   requested: string,
-  matchMode: WatcherTargetMatch = "exact",
+  matchMode: WatcherTargetMatch = "substring",
 ): TargetSelection {
   if (matchMode === "exact") {
     const exact = targets.filter((target) => target.name === requested);

@@ -1,0 +1,27 @@
+# Shared Funzzy and Pi watcher configuration.
+# Start with: fzz --log-file .tmp/funzzy/tests.log
+
+on:
+  socket: .pi/funzzy.sock
+  change:
+    - ".github/**"
+    - ".watch.yaml"
+    - "docs/**"
+    - "src/**"
+    - ".prettier*"
+    - "eslint.config.js"
+    - "Makefile"
+    - "package*.json"
+    - "README.md"
+    - "tsconfig.json"
+    - "vitest.config.ts"
+  ignore:
+    - "**/.pi/**"
+    - ".tmp/**"
+    - "coverage/**"
+    - "node_modules/**"
+
+tasks:
+  - name: project quality gate @quick @agent-final
+    run: make all
+    run_on_init: true

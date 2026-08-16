@@ -1,0 +1,11 @@
+node_modules/
+coverage/
+.direnv/
+.env
+.env.*
+!.env.example
+*.log
+.DS_Store
+
+# Generated code-intelligence indexes
+**/.pi/ast-index.sqlite

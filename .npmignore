@@ -1,0 +1,4 @@
+**/.pi/
+**/AGENTS.md
+src/**/*.test.ts
+coverage/

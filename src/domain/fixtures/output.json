@@ -1,0 +1,27 @@
+{
+  "generation": 7,
+  "tasks": [
+    {
+      "id": "lint",
+      "stdout": {
+        "content": "failure: boom\n  at src/main.rs:12\n",
+        "lines": 2,
+        "retainedBytes": 4096,
+        "observedBytes": 8192,
+        "truncated": true
+      },
+      "stderr": null
+    },
+    {
+      "id": "test",
+      "stdout": null,
+      "stderr": {
+        "content": "error: nope\n",
+        "lines": 1,
+        "retainedBytes": 13,
+        "observedBytes": 13,
+        "truncated": false
+      }
+    }
+  ]
+}

@@ -1,3 +1,10 @@
 #!/usr/bin/env sh
+# Git exports GIT_DIR/GIT_WORK_TREE/... into hooks. In a submodule checkout
+# GIT_DIR points at .git/modules/<name> — any git subprocess spawned by the
+# test suite that does not sanitize its env (see gitEnv() in e2e tests)
+# would then write THIS submodule's index from inside a scratch worktree
+# (observed corruption: junk 2-entry index, TASK-0115). Strip the redirect
+# variables here so the leak can never reach the suite.
 set -eu
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY
 make quick

@@ -1,3 +1,6 @@
 #!/usr/bin/env sh
+# See pre-commit: hooks inherit git's repo-redirect variables, which must
+# never leak into the test suite's scratch git operations (TASK-0115).
 set -eu
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY
 make all

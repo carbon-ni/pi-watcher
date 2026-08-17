@@ -1,0 +1,38 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended"],
+  "description": "pi-watcher dependency update grouping (TASK-0108): Pi SDK pair and TypeScript toolchain stay coherent; majors never batch.",
+  "rangeStrategy": "bump",
+  "labels": ["dependencies"],
+  "packageRules": [
+    {
+      "description": "Pi SDK pair must always move together to one tested release (exact dev pins).",
+      "matchPackageNames": [
+        "@earendil-works/pi-ai",
+        "@earendil-works/pi-coding-agent"
+      ],
+      "groupName": "pi sdk (paired)"
+    },
+    {
+      "description": "TypeScript toolchain moves as one coherent unit (tsc, lint parser, node types).",
+      "matchPackageNames": [
+        "typescript",
+        "typescript-eslint",
+        "@types/node"
+      ],
+      "groupName": "typescript toolchain"
+    },
+    {
+      "description": "Vitest and coverage provider move together.",
+      "matchPackageNames": ["vitest", "@vitest/coverage-v8"],
+      "groupName": "vitest"
+    },
+    {
+      "description": "Everything else: separate PRs per major; minors may group per package.",
+      "separateMajorMinor": true,
+      "major": {
+        "groupName": null
+      }
+    }
+  ]
+}

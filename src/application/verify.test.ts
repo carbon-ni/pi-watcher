@@ -157,7 +157,7 @@ describe("generation reporting", () => {
     };
 
     const result = await requestVerifiedRun(
-      { target: "lint", timeoutMs: 120_000, matchMode: "exact" },
+      { target: "lint", timeoutMs: 120_000 },
       { port, fingerprint, onGeneration: (generation) => generations.push(generation) },
     );
 

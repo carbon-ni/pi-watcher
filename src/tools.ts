@@ -336,21 +336,15 @@ export function registerTools(pi: ExtensionAPI, deps: ToolDeps): void {
     name: "watcher_verify",
     label: "Watcher Verify",
     description:
-      "Run the exact named Funzzy target and return its terminal result with freshness proof; use watcher_targets to discover exact names",
+      "Run the default @agent-final Funzzy gate, or override it with one unique target substring, and return freshness proof",
     promptSnippet: "Run the external Funzzy final verification gate",
     promptGuidelines: [
-      "Select one uniquely matching target substring; ambiguity returns candidates instead of running work.",
+      "Omit target for the default @agent-final gate; pass a unique target substring only to override it.",
       "Accept green only when the watcher instance is continuous, the snapshot is fresh, and the worktree fingerprint is unchanged.",
     ],
     parameters: Type.Object({
-      target: Type.Optional(Type.String({ description: "Exact Funzzy target name" })),
-      matchMode: Type.Optional(
-        Type.Union([
-          Type.Literal("exact", { description: "Only exact target names match" }),
-          Type.Literal("substring", {
-            description: "Allow one unambiguous substring match (explicit opt-in)",
-          }),
-        ]),
+      target: Type.Optional(
+        Type.String({ description: "Unique Funzzy target substring; defaults to @agent-final" }),
       ),
       timeoutSeconds: Type.Optional(Type.Integer({ minimum: 1, maximum: 900 })),
       sequential: Type.Optional(
@@ -364,8 +358,7 @@ export function registerTools(pi: ExtensionAPI, deps: ToolDeps): void {
       const config = await deps.requireTrustedConfig(ctx);
       const targets = await deps.listTargets(config.socketPath);
       const requested = params.target ?? "@agent-final";
-      const matchMode = params.matchMode === "exact" ? "exact" : "substring";
-      const selection = selectTarget(targets, requested, matchMode);
+      const selection = selectTarget(targets, requested);
       if (selection.kind === "missing") {
         const candidates =
           selection.candidates.length > 0 ? `; candidates: ${selection.candidates.join(", ")}` : "";
@@ -412,7 +405,6 @@ export function registerTools(pi: ExtensionAPI, deps: ToolDeps): void {
           config,
           {
             target: selection.target.name,
-            matchMode,
             timeoutMs: timeout.milliseconds,
             timeoutSource: timeout.source,
             estimate: timeout.estimate,

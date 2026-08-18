@@ -41,15 +41,15 @@ describe("selectTarget", () => {
     });
   });
 
-  it("selects a unique substring when explicitly requested", () => {
-    expect(selectTarget(TARGETS, "agent-slow", "substring")).toEqual({
+  it("selects a unique substring", () => {
+    expect(selectTarget(TARGETS, "agent-slow")).toEqual({
       kind: "selected",
       target: TARGETS[2],
     });
   });
 
   it("reports ambiguity with candidates for multiple substring matches", () => {
-    expect(selectTarget(TARGETS, "final checks", "substring")).toEqual({
+    expect(selectTarget(TARGETS, "final checks")).toEqual({
       kind: "ambiguous",
       candidates: ["final checks @agent-final", "final checks @agent-slow"],
     });
@@ -60,7 +60,7 @@ describe("selectTarget", () => {
       name: `final-${index}`,
       commands: [],
     }));
-    const selection = selectTarget(many, "final-", "substring");
+    const selection = selectTarget(many, "final-");
     expect(selection.kind).toBe("ambiguous");
     if (selection.kind !== "ambiguous") return;
     expect(selection.candidates).toHaveLength(5);
@@ -115,7 +115,6 @@ describe("formatVerification", () => {
   const base: WatcherVerification = {
     reason: "passed",
     target: "lint",
-    matchMode: "exact",
     instance: null,
     generation: 7,
     freshness: "current",

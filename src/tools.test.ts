@@ -103,6 +103,7 @@ const OUTPUT_RESULT: WatcherOutputResult = {
 type RegisteredToolCapture = {
   name: string;
   description: string;
+  parameters?: { properties?: Record<string, unknown> };
   execute: (...args: unknown[]) => Promise<unknown>;
 };
 
@@ -134,7 +135,6 @@ function createDeps(overrides: Record<string, unknown> = {}) {
   const verification: WatcherVerification = {
     reason: "passed",
     target: "lint",
-    matchMode: "exact",
     instance: null,
     generation: 7,
     freshness: "polled",
@@ -216,6 +216,16 @@ describe("registerTools", () => {
       "watcher_cancel",
       "watcher_verify",
     ]);
+  });
+
+  it("exposes only substring target selection for watcher_verify", () => {
+    const { pi, tools } = createPi();
+
+    registerTools(pi as never, createDeps());
+
+    expect(registeredTool(tools, "watcher_verify")?.parameters?.properties).not.toHaveProperty(
+      "matchMode",
+    );
   });
 });
 
@@ -1038,7 +1048,6 @@ describe("watcher_verify", () => {
       CONFIG,
       {
         target: "@agent-final",
-        matchMode: "substring",
         timeoutMs: 120_000,
         timeoutSource: "default",
         estimate: null,
@@ -1070,7 +1079,6 @@ describe("watcher_verify", () => {
       CONFIG,
       {
         target: "lint",
-        matchMode: "substring",
         timeoutMs: 120_000,
         timeoutSource: "default",
         estimate: null,
@@ -1104,7 +1112,6 @@ describe("watcher_verify", () => {
       CONFIG,
       {
         target: "lint",
-        matchMode: "substring",
         timeoutMs: 95_000,
         timeoutSource: "measured",
         estimate: { samples: 12 },
@@ -1168,11 +1175,7 @@ describe("watcher_verify", () => {
     registerTools(pi as never, createDeps({ listTargets, verifyRequest }));
 
     await expect(
-      runTool(
-        registeredTool(tools, "watcher_verify"),
-        { target: "final checks", matchMode: "substring" },
-        trustedCtx(),
-      ),
+      runTool(registeredTool(tools, "watcher_verify"), { target: "final checks" }, trustedCtx()),
     ).rejects.toThrow(/ambiguous/);
     expect(verifyRequest).not.toHaveBeenCalled();
   });

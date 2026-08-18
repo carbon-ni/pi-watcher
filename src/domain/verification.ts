@@ -19,12 +19,9 @@ import type { WatcherObservationSource } from "./observation.js";
  * and weaker polling guarantees are labeled, never equated with atomic ones.
  */
 
-export type WatcherTargetMatch = "exact" | "substring";
-
 export interface WatcherVerifyRequest {
-  /** Unique target substring by default; exact mode is available when required. */
+  /** Unique target substring. */
   target: string;
-  matchMode?: WatcherTargetMatch;
   timeoutMs?: number;
   timeoutSource?: TimeoutSource;
   estimate?: WatcherDurationEstimate | null;
@@ -57,17 +54,7 @@ const MAX_CANDIDATES = 5;
  * Unique substring selection by default. Ambiguity always yields candidates,
  * never a silent pick (contract §5).
  */
-export function selectTarget(
-  targets: WatcherTarget[],
-  requested: string,
-  matchMode: WatcherTargetMatch = "substring",
-): TargetSelection {
-  if (matchMode === "exact") {
-    const exact = targets.filter((target) => target.name === requested);
-    if (exact.length === 1) return { kind: "selected", target: exact[0]! };
-    return { kind: "missing", candidates: substringCandidates(targets, requested) };
-  }
-
+export function selectTarget(targets: WatcherTarget[], requested: string): TargetSelection {
   const matches = targets.filter((target) => target.name.includes(requested));
   if (matches.length === 1) return { kind: "selected", target: matches[0]! };
   if (matches.length > 1) {
@@ -78,13 +65,6 @@ export function selectTarget(
 
 function formatMilliseconds(milliseconds: number): string {
   return milliseconds % 1_000 === 0 ? `${milliseconds / 1_000}s` : `${milliseconds}ms`;
-}
-
-function substringCandidates(targets: WatcherTarget[], requested: string): string[] {
-  return targets
-    .filter((target) => target.name.includes(requested))
-    .slice(0, MAX_CANDIDATES)
-    .map((target) => target.name);
 }
 
 /** One terminal verdict for a verified run, with typed evidence. */
@@ -99,7 +79,6 @@ export interface VerificationProgress {
 export interface WatcherVerification {
   reason: VerificationReason;
   target: string;
-  matchMode: WatcherTargetMatch;
   /** Null when the transport could not identify the watcher instance. */
   instance: WatcherInstance | null;
   generation: number | null;

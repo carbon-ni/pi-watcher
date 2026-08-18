@@ -222,6 +222,18 @@ describe("session start", () => {
     expect(setStatus).not.toHaveBeenCalled();
   });
 
+  it("falls back to polling when capability negotiation is unavailable at startup", async () => {
+    const { ctx, deps, lifecycle, setStatus } = createHarness({
+      loadCapabilities: vi.fn().mockRejectedValue(new Error("socket unavailable")),
+      queryStatus: vi.fn().mockRejectedValue(new Error("socket unavailable")),
+    });
+
+    await expect(lifecycle.sessionStart({} as never, ctx as never)).resolves.toBeUndefined();
+
+    expect(deps.createPollingPort).toHaveBeenCalledWith(CONFIG.socketPath, CONFIG.pollIntervalMs);
+    expect(setStatus).toHaveBeenCalledWith("watcher-status", "warning:watcher: unavailable");
+  });
+
   it("publishes unavailable watcher state when observation fails", async () => {
     const { ctx, deps, lifecycle, setStatus } = createHarness();
     deps.queryStatus.mockRejectedValueOnce(new Error("socket unavailable"));

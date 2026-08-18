@@ -103,12 +103,19 @@ export function createPollingLifecycle(pi: ExtensionAPI, deps: PollingDeps): Pol
     // Capability-gated transport (contract §8): subscription when the watcher
     // supports it, legacy polling otherwise. Polled observations are marked
     // with the weaker-freshness footer suffix by the sink below.
-    const profile = await deps.loadCapabilities(config.socketPath);
-    watcherInstanceToken = profile.instance.token;
-    const port =
-      profile.features.subscription && profile.features.correlatedSnapshots
-        ? deps.createSubscriptionPort(config.socketPath)
-        : deps.createPollingPort(config.socketPath, config.pollIntervalMs);
+    let port: ObserverPort;
+    try {
+      const profile = await deps.loadCapabilities(config.socketPath);
+      watcherInstanceToken = profile.instance.token;
+      port =
+        profile.features.subscription && profile.features.correlatedSnapshots
+          ? deps.createSubscriptionPort(config.socketPath)
+          : deps.createPollingPort(config.socketPath, config.pollIntervalMs);
+    } catch {
+      // A configured watcher may not be running when Pi starts. Keep the
+      // extension loaded and let the polling port publish/recover availability.
+      port = deps.createPollingPort(config.socketPath, config.pollIntervalMs);
+    }
 
     const current = createObserver({
       port,

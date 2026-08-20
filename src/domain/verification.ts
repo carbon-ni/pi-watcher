@@ -103,6 +103,50 @@ export interface WatcherVerification {
   concurrencySource: string | null;
 }
 
+export interface TerminalVerificationInput {
+  fingerprintBefore: string;
+  fingerprintAfter: string;
+  snapshot: WatcherCorrelatedSnapshot | null;
+  statusState: WatcherExecutionState;
+}
+
+export interface TerminalVerificationDecision {
+  reason: VerificationReason;
+  freshness: WatcherFreshness | "polled";
+}
+
+/**
+ * Pure terminal acceptance policy. Correlated snapshots keep their reported
+ * freshness; legacy status is always labeled polled and never upgraded to the
+ * atomic guarantee.
+ */
+export function classifyTerminalVerification(
+  input: TerminalVerificationInput,
+): TerminalVerificationDecision {
+  const fingerprintChanged = input.fingerprintAfter !== input.fingerprintBefore;
+  if (input.snapshot === null) {
+    return {
+      reason: fingerprintChanged ? "stale" : reasonFromState(input.statusState),
+      freshness: "polled",
+    };
+  }
+
+  const freshness = input.snapshot.freshness;
+  if (fingerprintChanged) return { reason: "stale", freshness };
+  if (freshness === "unknown") return { reason: "unknown", freshness };
+  if (freshness !== "current" || input.snapshot.pending > 0) {
+    return { reason: "stale", freshness };
+  }
+  return { reason: reasonFromState(input.snapshot.state), freshness };
+}
+
+function reasonFromState(state: WatcherExecutionState): VerificationReason {
+  if (state === "passed") return "passed";
+  if (state === "failed") return "failed";
+  if (state === "cancelled") return "cancelled";
+  return "unknown";
+}
+
 /** Evidence bound: never more than 40 lines nor 4000 chars reach a tool. */
 export function boundEvidence(failures: string[], maxLines = 40, maxChars = 4_000): string[] {
   const bounded: string[] = [];

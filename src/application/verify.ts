@@ -1,5 +1,6 @@
 import {
   boundEvidence,
+  classifyTerminalVerification,
   type WatcherVerifyRequest,
   type WatcherVerification,
   type VerificationReason,
@@ -12,11 +13,11 @@ import type { VerificationProgress } from "../domain/verification.js";
 /**
  * Atomic verification use case (contract §4, §5).
  *
- * One injected port performs the server-side run-and-await; this module owns
- * acceptance policy: instance continuity, snapshot freshness, pending-work
- * invalidation, and before/after worktree fingerprints. Superseded runs retry
- * only while the worktree is unchanged and only up to a bounded number of
- * times; the extension never silently loops requesting expensive work.
+ * One injected port performs server-side run-and-await; this module owns retry,
+ * progress, and result assembly while domain policy classifies terminal
+ * snapshots and fingerprints. Superseded runs retry only while the worktree is
+ * unchanged and only up to a bounded number of times; extension never silently
+ * loops requesting expensive work.
  * The port owns transport; nothing here touches sockets.
  */
 
@@ -145,42 +146,19 @@ export async function requestVerifiedRun(
 
           if (outcome.snapshot !== null) {
             instance = outcome.snapshot.instance;
-            freshness = outcome.snapshot.freshness;
             pending = outcome.snapshot.pending;
             configuredConcurrency = outcome.snapshot.configuredConcurrency;
             effectiveConcurrency = outcome.snapshot.effectiveConcurrency;
             concurrencySource = outcome.snapshot.concurrencySource;
-            if (fingerprintAfter !== fingerprintBefore) {
-              reason = "stale";
-            } else if (outcome.snapshot.freshness === "unknown") {
-              reason = "unknown";
-            } else if (outcome.snapshot.freshness !== "current" || outcome.snapshot.pending > 0) {
-              reason = "stale";
-            } else if (outcome.snapshot.state === "passed") {
-              reason = "passed";
-            } else if (outcome.snapshot.state === "failed") {
-              reason = "failed";
-            } else if (outcome.snapshot.state === "cancelled") {
-              reason = "cancelled";
-            } else {
-              reason = "unknown";
-            }
-          } else {
-            // Legacy polled fallback: no correlation fields, so guarantees are
-            // weaker and labeled, never equated with the atomic path (contract §8).
-            freshness = "polled";
-            if (fingerprintAfter !== fingerprintBefore) {
-              reason = "stale";
-            } else if (outcome.status.state === "passed") {
-              reason = "passed";
-            } else if (outcome.status.state === "failed") {
-              reason = "failed";
-            } else if (outcome.status.state === "cancelled") {
-              reason = "cancelled";
-            } else {
-              reason = "unknown";
-            }
           }
+          const decision = classifyTerminalVerification({
+            fingerprintBefore,
+            fingerprintAfter,
+            snapshot: outcome.snapshot,
+            statusState: outcome.status.state,
+          });
+          reason = decision.reason;
+          freshness = decision.freshness;
           break;
         }
 

@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import atomicRunFixture from "./fixtures/atomic-run.json" with { type: "json" };
 import {
   boundEvidence,
+  classifyTerminalVerification,
   decodeAtomicRunResult,
   formatVerification,
   formatVerificationProgress,
@@ -11,6 +12,24 @@ import {
   type WatcherVerification,
 } from "./verification.js";
 import type { WatcherTarget } from "./watcher.js";
+
+const TERMINAL_SNAPSHOT = {
+  instance: { token: "fz-test", startedAtEpochMs: 1 },
+  generation: 7,
+  batchId: "b-7",
+  state: "passed" as const,
+  trigger: "control:lint",
+  commands: ["make lint"],
+  tasks: [],
+  pending: 0,
+  freshness: "current" as const,
+  durationMs: 42,
+  failures: [],
+  paths: [],
+  configuredConcurrency: 2,
+  effectiveConcurrency: 2,
+  concurrencySource: "config",
+};
 
 const TARGETS: WatcherTarget[] = [
   { name: "lint", commands: ["npm run lint"] },
@@ -64,6 +83,64 @@ describe("selectTarget", () => {
     expect(selection.kind).toBe("ambiguous");
     if (selection.kind !== "ambiguous") return;
     expect(selection.candidates).toHaveLength(5);
+  });
+});
+
+describe("classifyTerminalVerification", () => {
+  it.each([
+    ["passed", "passed"],
+    ["failed", "failed"],
+    ["cancelled", "cancelled"],
+    ["running", "unknown"],
+  ] as const)("maps current terminal state %s to %s", (state, reason) => {
+    expect(
+      classifyTerminalVerification({
+        fingerprintBefore: "same",
+        fingerprintAfter: "same",
+        snapshot: { ...TERMINAL_SNAPSHOT, state },
+        statusState: state,
+      }),
+    ).toEqual({ reason, freshness: "current" });
+  });
+
+  it.each([
+    [{ freshness: "stale" as const }, "stale", "stale"],
+    [{ freshness: "unknown" as const }, "unknown", "unknown"],
+    [{ pending: 1 }, "stale", "current"],
+  ] as const)(
+    "fails closed for an untrusted correlated snapshot",
+    (overrides, reason, freshness) => {
+      expect(
+        classifyTerminalVerification({
+          fingerprintBefore: "same",
+          fingerprintAfter: "same",
+          snapshot: { ...TERMINAL_SNAPSHOT, ...overrides },
+          statusState: "passed",
+        }),
+      ).toEqual({ reason, freshness });
+    },
+  );
+
+  it("makes changed worktree stale before accepting green", () => {
+    expect(
+      classifyTerminalVerification({
+        fingerprintBefore: "before",
+        fingerprintAfter: "after",
+        snapshot: TERMINAL_SNAPSHOT,
+        statusState: "passed",
+      }),
+    ).toEqual({ reason: "stale", freshness: "current" });
+  });
+
+  it("labels legacy status as polled without upgrading its guarantee", () => {
+    expect(
+      classifyTerminalVerification({
+        fingerprintBefore: "same",
+        fingerprintAfter: "same",
+        snapshot: null,
+        statusState: "failed",
+      }),
+    ).toEqual({ reason: "failed", freshness: "polled" });
   });
 });
 

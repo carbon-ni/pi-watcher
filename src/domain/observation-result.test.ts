@@ -189,7 +189,30 @@ describe("formatObservation", () => {
     );
 
     expect(formatObservation(result)).toBe(
-      "PASS gen=7 freshness=current duration=120ms concurrency=2/2 source=config",
+      "PASS gen=7 freshness=current duration=120ms concurrency=2/2 source=config\njobs:\n  JOB RESULT DURATION\n  [t-1] lint failed 120ms\n  [t-2] test passed 42ms",
+    );
+  });
+
+  it("appends declaration-ordered job timing rows and renders absent duration as a dash", () => {
+    const result = observationResult(
+      {
+        ...OBSERVATION,
+        status: { ...OBSERVATION.status, state: "passed", failures: [] },
+        snapshot: {
+          ...SNAPSHOT,
+          state: "passed",
+          tasks: [
+            { id: "first", name: "first", state: "passed", durationMs: 0 },
+            { id: "checks#1", name: "second", state: "cancelled", durationMs: null },
+            { id: "third", name: "third", state: "failed", durationMs: 1_500 },
+          ],
+        },
+      },
+      "terminal",
+    );
+
+    expect(formatObservation(result)).toBe(
+      "PASS gen=7 freshness=current duration=120ms concurrency=2/2 source=config\njobs:\n  JOB RESULT DURATION\n  first passed 0ms\n  [checks#1] second cancelled -\n  third failed 1.5s",
     );
   });
 
@@ -202,7 +225,7 @@ describe("formatObservation", () => {
     );
 
     expect(formatObservation(result)).toBe(
-      "FAIL gen=7 freshness=current task=lint duration=120ms\n  - failure 0\n  - failure 1\nnext: watcher_output generation=7 task=lint",
+      "FAIL gen=7 freshness=current task=lint duration=120ms\n  - failure 0\n  - failure 1\nnext: watcher_output generation=7 task=lint\njobs:\n  JOB RESULT DURATION\n  [t-1] lint failed 120ms\n  [t-2] test passed 42ms",
     );
   });
 
@@ -219,7 +242,7 @@ describe("formatObservation", () => {
     };
 
     expect(formatObservation(observationResult(multiFailed, "terminal"))).toBe(
-      "FAIL gen=7 freshness=current tasks=2 failed duration=120ms\n  - boom: failed to lint\n  - boom: second failure",
+      "FAIL gen=7 freshness=current tasks=2 failed duration=120ms\n  - boom: failed to lint\n  - boom: second failure\njobs:\n  JOB RESULT DURATION\n  [t-1] lint failed 120ms\n  [t-2] test failed 42ms",
     );
   });
 

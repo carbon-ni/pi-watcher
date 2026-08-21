@@ -5,7 +5,11 @@ import {
   type WatcherVerification,
   type VerificationReason,
 } from "../domain/verification.js";
-import type { WatcherCorrelatedSnapshot, WatcherInstance } from "../domain/capabilities.js";
+import type {
+  WatcherCorrelatedSnapshot,
+  WatcherInstance,
+  WatcherTaskOutcome,
+} from "../domain/capabilities.js";
 import type { WatcherObservationSource } from "../domain/observation.js";
 import type { WatcherExecutionState, WatcherStatus } from "../domain/watcher.js";
 import type { VerificationProgress } from "../domain/verification.js";
@@ -87,6 +91,7 @@ export async function requestVerifiedRun(
   let generation: number | null = null;
   let state: WatcherExecutionState | null = null;
   let durationMs: number | null = null;
+  let tasks: WatcherTaskOutcome[] = [];
   let failures: string[] = [];
   let pending: number | null = null;
   let instance: WatcherInstance | null = null;
@@ -145,6 +150,7 @@ export async function requestVerifiedRun(
           fingerprintAfter = await deps.fingerprint();
 
           if (outcome.snapshot !== null) {
+            tasks = outcome.snapshot.tasks;
             instance = outcome.snapshot.instance;
             pending = outcome.snapshot.pending;
             configuredConcurrency = outcome.snapshot.configuredConcurrency;
@@ -191,6 +197,7 @@ export async function requestVerifiedRun(
       fingerprintBefore,
       state,
       durationMs,
+      tasks,
       failures: boundEvidence(failures),
       evidenceTruncated: isEvidenceTruncated(failures),
       pending,

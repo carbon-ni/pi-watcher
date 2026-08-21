@@ -24,6 +24,7 @@
     "src/application/stable-run.ts",
     "src/domain/activity.ts",
     "src/domain/failure-notifier.ts",
+    "src/domain/job-timing-presentation.ts",
     "src/domain/status-presentation.ts",
     "src/domain/targets-presentation.ts",
     "src/domain/watcher.ts",

@@ -216,6 +216,21 @@ describe("formatVerification", () => {
     );
   });
 
+  it("appends declaration-ordered terminal job timing rows", () => {
+    expect(
+      formatVerification({
+        ...base,
+        tasks: [
+          { id: "first", name: "first", state: "passed", durationMs: 0 },
+          { id: "checks#1", name: "second", state: "cancelled", durationMs: null },
+          { id: "third", name: "third", state: "failed", durationMs: 1_500 },
+        ],
+      }),
+    ).toBe(
+      "PASS gen=7 target=lint duration=42ms concurrency=2/2 source=config fingerprint=abc123def456\njobs:\n  JOB RESULT DURATION\n  first passed 0ms\n  [checks#1] second cancelled -\n  third failed 1.5s",
+    );
+  });
+
   it("renders a fail with bounded evidence", () => {
     expect(
       formatVerification({ ...base, reason: "failed", failures: ["cargo test exited with 1"] }),
@@ -245,6 +260,27 @@ describe("formatVerification", () => {
     });
 
     expect(text).not.toContain("watcher_output");
+  });
+
+  it("appends job timing rows for a cancelled terminal verification", () => {
+    expect(
+      formatVerification({
+        ...base,
+        reason: "cancelled",
+        state: "cancelled",
+        tasks: [{ id: "lint", name: "lint", state: "cancelled", durationMs: null }],
+      }),
+    ).toBe("CANCELLED gen=7 target=lint\njobs:\n  JOB RESULT DURATION\n  lint cancelled -");
+  });
+
+  it("keeps terminal job timing visible when verification is stale", () => {
+    expect(
+      formatVerification({
+        ...base,
+        reason: "stale",
+        tasks: [{ id: "lint", name: "lint", state: "passed", durationMs: 42 }],
+      }),
+    ).toBe("STALE gen=7 target=lint\njobs:\n  JOB RESULT DURATION\n  lint passed 42ms");
   });
 
   it("renders explicit non-terminal reasons", () => {

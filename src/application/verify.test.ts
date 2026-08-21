@@ -176,8 +176,18 @@ describe("atomic acceptance", () => {
     expect(result.instance?.token).toBe("fz-7f3a");
     expect(result.freshness).toBe("current");
     expect(result.source).toBe("subscription");
+    expect(result.tasks).toEqual(SNAPSHOT.tasks);
     expect(result.fingerprint).toBe("abc123");
     expect(calls[0]).toEqual({ target: "lint", timeoutMs: 120_000 });
+  });
+
+  it("keeps job timing unavailable for a legacy terminal status", async () => {
+    const { port } = createFakePort([terminal({ snapshot: null, source: "polled" })]);
+
+    const result = await requestVerifiedRun({ target: "lint" }, { port, fingerprint });
+
+    expect(result.tasks).toEqual([]);
+    expect(result.source).toBe("polled");
   });
 
   it("reports a failed run with bounded evidence", async () => {

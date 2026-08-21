@@ -3,6 +3,7 @@ import {
   type WatcherCorrelatedSnapshot,
   type WatcherFreshness,
   type WatcherInstance,
+  type WatcherTaskOutcome,
 } from "./capabilities.js";
 import { expectObject, readRequiredNumber, WatcherProtocolError } from "./protocol.js";
 
@@ -11,6 +12,7 @@ import type { WatcherExecutionState, WatcherTarget } from "./watcher.js";
 import type { TimeoutSource } from "./timeout-selection.js";
 import type { WatcherDurationEstimate } from "./duration-estimate.js";
 import type { WatcherObservationSource } from "./observation.js";
+import { formatJobTimings } from "./job-timing-presentation.js";
 
 /**
  * Verification vocabulary (contract §4, §5): deterministic target selection, atomic
@@ -90,6 +92,8 @@ export interface WatcherVerification {
   fingerprintBefore: string;
   state: WatcherExecutionState | null;
   durationMs: number | null;
+  /** Immutable terminal task snapshots; empty when legacy transport lacks them. */
+  tasks?: WatcherTaskOutcome[];
   /** Bounded failure evidence (see boundEvidence). */
   failures: string[];
   /** True when boundEvidence cut evidence; retrieval hint applies. */
@@ -189,7 +193,7 @@ export function formatVerification(verification: WatcherVerification): string {
               ? ""
               : ` source=${verification.concurrencySource}`
           }`;
-    return `PASS${generation}${target}${duration}${concurrency} fingerprint=${verification.fingerprint.slice(0, 12)}`;
+    return `PASS${generation}${target}${duration}${concurrency} fingerprint=${verification.fingerprint.slice(0, 12)}${formatJobTimings(verification.tasks ?? [])}`;
   }
   if (verification.reason === "failed") {
     const failures = verification.failures
@@ -201,9 +205,17 @@ export function formatVerification(verification: WatcherVerification): string {
       verification.evidenceTruncated && verification.generation !== null
         ? `\nnext: watcher_output generation=${verification.generation} task=${verification.target}`
         : "";
-    return failures ? `${summary}\n${failures}${next}` : summary;
+    return `${failures ? `${summary}\n${failures}${next}` : summary}${formatJobTimings(
+      verification.tasks ?? [],
+    )}`;
   }
-  return `${verification.reason.toUpperCase()}${generation}${target}`;
+  const timings =
+    verification.state === "passed" ||
+    verification.state === "failed" ||
+    verification.state === "cancelled"
+      ? formatJobTimings(verification.tasks ?? [])
+      : "";
+  return `${verification.reason.toUpperCase()}${generation}${target}${timings}`;
 }
 
 /**

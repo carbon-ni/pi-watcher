@@ -7,6 +7,7 @@ import type {
 import type { CorrelationClass } from "./correlation.js";
 import type { WatcherObservation, WatcherObservationSource } from "./observation.js";
 import type { WatcherExecutionState } from "./watcher.js";
+import { formatJobTimings } from "./job-timing-presentation.js";
 
 /**
  * Observation vocabulary (contract §7): one decision-oriented result for the
@@ -196,7 +197,7 @@ function formatStateLine(
     const next = result.nextAction === null ? "" : `\nnext: ${result.nextAction}`;
     return `FAIL${generation}${freshness}${failedLabel}${duration}${polled}${
       lines ? `\n${lines}` : ""
-    }${next}`;
+    }${next}${formatJobTimings(result.tasks)}`;
   }
   const label = STATE_LABELS[result.state ?? "unknown"];
   const concurrency =
@@ -205,7 +206,9 @@ function formatStateLine(
       : ` concurrency=${result.effectiveConcurrency}/${result.configuredConcurrency}${
           result.concurrencySource === null ? "" : ` source=${result.concurrencySource}`
         }`;
-  return `${label}${generation}${freshness}${duration}${concurrency}${polled}`;
+  const timings =
+    result.state === "passed" || result.state === "cancelled" ? formatJobTimings(result.tasks) : "";
+  return `${label}${generation}${freshness}${duration}${concurrency}${polled}${timings}`;
 }
 
 const STATE_LABELS: Record<WatcherExecutionState | "unknown", string> = {

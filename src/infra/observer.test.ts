@@ -119,6 +119,35 @@ describe("createPollingPort", () => {
 });
 
 describe("createSubscriptionPort", () => {
+  test("rejects an already-aborted connection with a stable cancellation error", async () => {
+    const controller = new AbortController();
+    controller.abort();
+    const port = createSubscriptionPort(join(tmpdir(), "funzzy-never-connect.sock"));
+
+    await assert.rejects(
+      () => port.open(controller.signal).next(),
+      /Funzzy subscription connection aborted/,
+    );
+  });
+
+  test("aborting before connect destroys the socket without writing subscribe", async () => {
+    let requests = 0;
+    await withSocketServer(
+      () => {
+        requests += 1;
+      },
+      async (socketPath) => {
+        const controller = new AbortController();
+        const port = createSubscriptionPort(socketPath);
+        const next = port.open(controller.signal).next();
+        controller.abort();
+
+        await assert.rejects(next, /Funzzy subscription connection aborted/);
+        assert.equal(requests, 0);
+      },
+    );
+  });
+
   test("streams the immediate snapshot and snapshot notifications", async () => {
     await withSocketServer(
       (request, socket) => {

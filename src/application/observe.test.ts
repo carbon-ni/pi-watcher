@@ -370,6 +370,28 @@ describe("requestObservation wait mode", () => {
     expect(result.generation).toBe(5);
   });
 
+  it("classifies a handshake cancellation at the deadline as timeout", async () => {
+    vi.useFakeTimers();
+    const { deps } = createHarness();
+    const port: ObserverPort = {
+      async *open(signal) {
+        yield* [];
+        await new Promise<void>((resolve) =>
+          signal.addEventListener("abort", () => resolve(), { once: true }),
+        );
+        throw new Error("Funzzy subscription connection aborted");
+      },
+    };
+    const promise = requestObservation(
+      { wait: true, timeoutMs: 10 },
+      { ...deps, port, now: () => Date.now() },
+    );
+
+    await vi.advanceTimersByTimeAsync(10);
+
+    await expect(promise).resolves.toMatchObject({ outcome: "timeout" });
+  });
+
   it("returns aborted when the AbortSignal fires during the wait", async () => {
     const { scripted, deps } = createHarness();
     const controller = new AbortController();

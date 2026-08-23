@@ -63,7 +63,7 @@ async function* subscribeToSnapshots(
   let sequence = 0;
   const socket = createConnection(socketPath);
   try {
-    await waitForConnect(socket);
+    await waitForConnect(socket, signal);
     socket.write(`${JSON.stringify({ jsonrpc: "2.0", id: "subscribe", method: "subscribe" })}\n`);
 
     for await (const line of socketJsonLines(socket, signal)) {
@@ -107,18 +107,39 @@ function observationFromSnapshot(
   };
 }
 
-function waitForConnect(socket: Socket): Promise<void> {
+const SUBSCRIPTION_ABORT_MESSAGE = "Funzzy subscription connection aborted";
+
+function waitForConnect(socket: Socket, signal: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
-    const onError = (error: Error): void => {
+    let settled = false;
+
+    const cleanup = (): void => {
       socket.removeListener("connect", onConnect);
-      reject(error);
-    };
-    const onConnect = (): void => {
       socket.removeListener("error", onError);
-      resolve();
+      signal.removeEventListener("abort", onAbort);
     };
+    const settle = (error?: Error): void => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      if (error) reject(error);
+      else resolve();
+    };
+    const onError = (error: Error): void => settle(error);
+    const onConnect = (): void => settle();
+    const onAbort = (): void => {
+      socket.destroy();
+      settle(new Error(SUBSCRIPTION_ABORT_MESSAGE));
+    };
+
+    if (signal.aborted) {
+      onAbort();
+      return;
+    }
     socket.once("connect", onConnect);
     socket.once("error", onError);
+    signal.addEventListener("abort", onAbort, { once: true });
+    if (signal.aborted) onAbort();
   });
 }
 

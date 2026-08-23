@@ -131,13 +131,19 @@ describe("createSubscriptionPort", () => {
   test("cleans handshake listeners before destroying on abort", async () => {
     const socket = new FakeSocket();
     const controller = new AbortController();
+    const addAbort = vi.spyOn(controller.signal, "addEventListener");
+    const removeAbort = vi.spyOn(controller.signal, "removeEventListener");
     const pending = waitForConnect(socket as unknown as Socket, controller.signal);
 
+    assert.equal(socket.listenerCount("connect"), 1);
+    assert.equal(socket.listenerCount("error"), 1);
+    assert.equal(addAbort.mock.calls.length, 1);
     controller.abort();
 
     await assert.rejects(pending, /Funzzy subscription connection aborted/);
     assert.equal(socket.listenerCount("connect"), 0);
     assert.equal(socket.listenerCount("error"), 0);
+    assert.equal(removeAbort.mock.calls.length, 1);
     assert.equal(socket.destroyed, true);
     socket.emit("connect");
   });
@@ -145,29 +151,55 @@ describe("createSubscriptionPort", () => {
   test("preserves the original connection error and cleans listeners", async () => {
     const socket = new FakeSocket();
     const controller = new AbortController();
+    const addAbort = vi.spyOn(controller.signal, "addEventListener");
+    const removeAbort = vi.spyOn(controller.signal, "removeEventListener");
     const pending = waitForConnect(socket as unknown as Socket, controller.signal);
     const error = new Error("connect failed");
 
+    assert.equal(socket.listenerCount("connect"), 1);
+    assert.equal(socket.listenerCount("error"), 1);
+    assert.equal(addAbort.mock.calls.length, 1);
     socket.emit("error", error);
 
-    await assert.rejects(pending, error);
+    await assert.rejects(pending, (actual) => actual === error);
     assert.equal(socket.listenerCount("connect"), 0);
     assert.equal(socket.listenerCount("error"), 0);
+    assert.equal(removeAbort.mock.calls.length, 1);
     assert.equal(socket.destroyed, false);
   });
 
   test("connect wins a race when it settles before abort", async () => {
     const socket = new FakeSocket();
     const controller = new AbortController();
+    const addAbort = vi.spyOn(controller.signal, "addEventListener");
+    const removeAbort = vi.spyOn(controller.signal, "removeEventListener");
     const pending = waitForConnect(socket as unknown as Socket, controller.signal);
 
+    assert.equal(socket.listenerCount("connect"), 1);
+    assert.equal(socket.listenerCount("error"), 1);
+    assert.equal(addAbort.mock.calls.length, 1);
     socket.emit("connect");
     controller.abort();
 
     await pending;
     assert.equal(socket.listenerCount("connect"), 0);
     assert.equal(socket.listenerCount("error"), 0);
+    assert.equal(removeAbort.mock.calls.length, 1);
     assert.equal(socket.destroyed, false);
+  });
+
+  test("already-aborted signals install no listeners and destroy the socket", async () => {
+    const socket = new FakeSocket();
+    const controller = new AbortController();
+    controller.abort();
+
+    await assert.rejects(
+      waitForConnect(socket as unknown as Socket, controller.signal),
+      /Funzzy subscription connection aborted/,
+    );
+    assert.equal(socket.listenerCount("connect"), 0);
+    assert.equal(socket.listenerCount("error"), 0);
+    assert.equal(socket.destroyed, true);
   });
 
   test("preserves connection errors when the socket cannot connect", async () => {

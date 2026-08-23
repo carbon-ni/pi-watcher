@@ -30,6 +30,7 @@ interface ObservationOverrides {
   status?: Partial<WatcherObservation["status"]>;
   snapshot?: WatcherObservation["snapshot"];
   freshness?: WatcherFreshness;
+  source?: WatcherObservation["source"];
 }
 
 function observation(
@@ -48,7 +49,7 @@ function observation(
       failures: [],
       ...(overrides.status ?? {}),
     },
-    source: "subscription",
+    source: overrides.source ?? "subscription",
     freshness: overrides.freshness ?? "current",
     snapshot: overrides.snapshot ?? {
       ...SNAPSHOT,
@@ -227,6 +228,74 @@ describe("requestObservation wait mode", () => {
     expect(result.outcome).toBe("terminal");
     expect(result.generation).toBe(5);
     expect(onObservation).toHaveBeenCalledTimes(2);
+  });
+
+  it("returns an exact passed generation immediately", async () => {
+    const { scripted, deps } = createHarness();
+    const promise = requestObservation({ wait: true, generation: 4 }, deps);
+    await flush();
+    scripted.stream().push(observation(4, "passed"));
+
+    const result = await promise;
+    expect(result.outcome).toBe("terminal");
+    expect(result.generation).toBe(4);
+  });
+
+  it("returns an exact failed generation with bounded evidence", async () => {
+    const { scripted, deps } = createHarness();
+    const promise = requestObservation({ wait: true, generation: 4, maxEvidenceLines: 1 }, deps);
+    await flush();
+    scripted.stream().push(
+      observation(4, "failed", {
+        status: { ...observation(4, "failed").status, failures: ["first", "second"] },
+      }),
+    );
+
+    const result = await promise;
+    expect(result.outcome).toBe("terminal");
+    expect(result.state).toBe("failed");
+    expect(result.failures).toEqual(["first"]);
+  });
+
+  it.each(["passed", "failed"] as const)(
+    "completes an exact %s generation on the polled fallback",
+    async (state) => {
+      const { scripted, deps } = createHarness();
+      const promise = requestObservation({ wait: true, generation: 4 }, deps);
+      await flush();
+      scripted.stream().push(
+        observation(4, state, {
+          source: "polled",
+          status: { failures: state === "failed" ? ["lint failed"] : [] },
+        }),
+      );
+
+      const result = await promise;
+      expect(result.outcome).toBe("terminal");
+      expect(result.source).toBe("polled");
+      expect(result.state).toBe(state);
+    },
+  );
+
+  it("reports exact generation superseded before terminal", async () => {
+    const { scripted, deps } = createHarness();
+    const promise = requestObservation({ wait: true, generation: 4 }, deps);
+    await flush();
+    scripted.stream().push(observation(5, "running"));
+
+    const result = await promise;
+    expect(result.outcome).toBe("superseded");
+    expect(result.supersedingGeneration).toBe(5);
+  });
+
+  it("rejects incompatible generation selectors", async () => {
+    const { deps } = createHarness();
+    await expect(requestObservation({ wait: false, generation: 4 }, deps)).rejects.toThrow(
+      /generation.*wait/i,
+    );
+    await expect(
+      requestObservation({ wait: true, generation: 4, afterGeneration: 3 }, deps),
+    ).rejects.toThrow(/mutually exclusive/i);
   });
 
   it("waits for the first generation newer than afterGeneration", async () => {

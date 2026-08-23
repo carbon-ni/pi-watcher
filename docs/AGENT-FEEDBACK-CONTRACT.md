@@ -141,10 +141,11 @@ Total agent context cost of a common failure loop (observe + verify + output) st
 **Copyable workflow** (the loop proven end to end in `src/e2e.test.ts`):
 
 1. `watcher_observe` (snapshot) → record the baseline generation `G` and state.
-2. Edit the worktree (edit/write results form the session checkpoint).
-3. `watcher_observe(wait: true, afterGeneration: G)` → the first fresh terminal result. A `superseded` or `stale` outcome is never accepted as the fresh checkpoint; re-observe with the newer generation.
-4. On `failed` with `truncated: true`, run the copyable `next` action (`watcher_output generation=N [task=X]`) for bounded evidence, apply the fix, and repeat from step 3 until the observation is fresh and green.
-5. `watcher_verify(target)` accepts green only under the §4 contract (instance continuity, freshness, unchanged fingerprint) — correlation never upgrades stale green.
-6. Abandoning a running verify: the tool abort sends compare-and-cancel for the exact generation (`cleanup=cancelled`); explicit `watcher_cancel(generation=N)` also works. A stale or replacement generation is a safe no-op.
+2. If `G` is already active and you want that run, use `watcher_observe(wait: true, generation: G)` (exact selector); it completes when `G` is terminal and reports superseded if a newer run replaces it.
+3. Edit the worktree (edit/write results form the session checkpoint).
+4. `watcher_observe(wait: true, afterGeneration: G)` → the first fresh terminal result. A `superseded` or `stale` outcome is never accepted as the fresh checkpoint; re-observe with the newer generation.
+5. On `failed` with `truncated: true`, run the copyable `next` action (`watcher_output generation=N [task=X]`) for bounded evidence, apply the fix, and repeat from step 4 until the observation is fresh and green.
+6. `watcher_verify(target)` accepts green only under the §4 contract (instance continuity, freshness, unchanged fingerprint) — correlation never upgrades stale green.
+7. Abandoning a running verify: the tool abort sends compare-and-cancel for the exact generation (`cleanup=cancelled`); explicit `watcher_cancel(generation=N)` also works. A stale or replacement generation is a safe no-op.
 
 Deterministic test proof: the e2e suite drives the real composition root against a scripted protocol server on a real Unix socket, with a real git worktree behind the fingerprint — every step control-driven, no sleeps, no environment mutation beyond a temp dir.

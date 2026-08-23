@@ -163,13 +163,21 @@ export function registerTools(pi: ExtensionAPI, deps: ToolDeps): void {
     promptSnippet: "Observe the external Funzzy watcher without rerunning tests",
     promptGuidelines: [
       "Call watcher_observe to snapshot watcher state or await the terminal result of a generation; it never triggers or cancels work.",
-      "Pass afterGeneration (a previously observed generation) with wait=true to await the first newer generation, e.g. after an edit.",
+      "Pass afterGeneration (a previously observed generation captured before an edit) with wait=true to await the first newer generation.",
+      "Pass generation with wait=true to await an already-observed exact generation; generation and afterGeneration cannot be combined.",
+      "For an already-active run, use generation or watcher_status(wait=true); do not use afterGeneration unless you intend to exclude that generation.",
     ],
     parameters: Type.Object({
       afterGeneration: Type.Optional(
         Type.Integer({
           minimum: 0,
           description: "Wait for the first generation newer than this one (used with wait)",
+        }),
+      ),
+      generation: Type.Optional(
+        Type.Integer({
+          minimum: 0,
+          description: "Wait for this exact generation to reach a terminal state (used with wait)",
         }),
       ),
       wait: Type.Optional(
@@ -189,8 +197,18 @@ export function registerTools(pi: ExtensionAPI, deps: ToolDeps): void {
     }),
     async execute(_toolCallId, params, signal, onUpdate, ctx) {
       const config = await deps.requireTrustedConfig(ctx);
-      const port = await deps.createObservePort(config);
       const wait = params.wait ?? false;
+      if (params.generation !== undefined && !wait) {
+        throw new Error(
+          "`generation` requires `wait: true`; use watcher_observe without a selector for snapshots",
+        );
+      }
+      if (params.generation !== undefined && params.afterGeneration !== undefined) {
+        throw new Error(
+          "`generation` and `afterGeneration` are mutually exclusive; choose one selector",
+        );
+      }
+      const port = await deps.createObservePort(config);
       const startedAt = Date.now();
       let lastUpdateAt = 0;
       let lastKey = "";
@@ -199,6 +217,7 @@ export function registerTools(pi: ExtensionAPI, deps: ToolDeps): void {
         {
           wait,
           afterGeneration: params.afterGeneration ?? null,
+          ...(params.generation === undefined ? {} : { generation: params.generation }),
           timeoutMs: (params.timeoutSeconds ?? (wait ? 120 : 10)) * 1_000,
           maxEvidenceLines: params.maxEvidenceLines,
         },
@@ -219,9 +238,10 @@ export function registerTools(pi: ExtensionAPI, deps: ToolDeps): void {
                 content: [
                   {
                     type: "text",
-                    text: `${formatObservationProgress(observation)} waited=${Math.floor(
-                      (now - startedAt) / 1_000,
-                    )}s`,
+                    text: `${formatObservationProgress(observation, {
+                      generation: params.generation,
+                      afterGeneration: params.afterGeneration,
+                    })} waited=${Math.floor((now - startedAt) / 1_000)}s`,
                   },
                 ],
                 details: observation,

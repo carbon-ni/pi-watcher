@@ -352,6 +352,24 @@ describe("formatObservationProgress", () => {
     expect(formatObservationProgress(OBSERVATION)).toBe("FAIL gen=7 freshness=current");
   });
 
+  it("labels exact-generation progress without changing observed generation", () => {
+    expect(formatObservationProgress(OBSERVATION, { generation: 7 })).toBe(
+      "FAIL gen=7 waitingForGeneration=7 freshness=current",
+    );
+  });
+
+  it.each(["passed", "failed"] as const)(
+    "labels excluded fresh-anchor %s progress as waiting",
+    (state) => {
+      expect(
+        formatObservationProgress(
+          { ...OBSERVATION, status: { ...OBSERVATION.status, state } },
+          { afterGeneration: 7 },
+        ),
+      ).toBe("WAITING gen=7 waitingForGeneration>7 freshness=current");
+    },
+  );
+
   it("marks polled progress with the weaker-freshness suffix", () => {
     const polled: WatcherObservation = {
       sequence: 1,

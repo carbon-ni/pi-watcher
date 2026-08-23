@@ -386,6 +386,44 @@ describe("watcher_observe", () => {
     );
   });
 
+  it("passes an exact generation selector", async () => {
+    const { pi, tools } = createPi();
+    const requestObservation = vi.fn().mockResolvedValue(OBSERVE_RESULT);
+    registerTools(pi as never, createDeps({ requestObservation }));
+
+    await runTool(
+      registeredTool(tools, "watcher_observe"),
+      { wait: true, generation: 7 },
+      trustedCtx(),
+    );
+
+    expect(requestObservation).toHaveBeenCalledWith(
+      expect.objectContaining({ wait: true, generation: 7, afterGeneration: null }),
+      expect.anything(),
+    );
+  });
+
+  it("rejects exact generation selectors without wait or with afterGeneration", async () => {
+    const { pi, tools } = createPi();
+    const createObservePort = vi.fn();
+    registerTools(pi as never, createDeps({ createObservePort }));
+    const tool = registeredTool(tools, "watcher_observe")!;
+
+    await expect(
+      tool.execute("1", { generation: 7 }, undefined, undefined, trustedCtx()),
+    ).rejects.toThrow(/generation.*wait/i);
+    await expect(
+      tool.execute(
+        "1",
+        { wait: true, generation: 7, afterGeneration: 6 },
+        undefined,
+        undefined,
+        trustedCtx(),
+      ),
+    ).rejects.toThrow(/mutually exclusive/i);
+    expect(createObservePort).not.toHaveBeenCalled();
+  });
+
   it("uses a shorter default timeout for snapshots", async () => {
     const { pi, tools } = createPi();
     const requestObservation = vi.fn().mockResolvedValue(OBSERVE_RESULT);

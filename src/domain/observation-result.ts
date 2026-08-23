@@ -39,6 +39,8 @@ export interface WatcherObserveRequest {
   wait: boolean;
   /** Only generations newer than this complete the wait (default: null). */
   afterGeneration?: number | null;
+  /** Complete only when this exact generation reaches a terminal state. */
+  generation?: number | null;
   /** Bounded wait budget; defaults differ for snapshot vs wait. */
   timeoutMs?: number;
   /** Max failure-evidence lines included (0 = none, default 40). */
@@ -211,6 +213,10 @@ function formatStateLine(
   return `${label}${generation}${freshness}${duration}${concurrency}${polled}${timings}`;
 }
 
+function isTerminalState(state: WatcherExecutionState): boolean {
+  return state === "passed" || state === "failed" || state === "cancelled";
+}
+
 const STATE_LABELS: Record<WatcherExecutionState | "unknown", string> = {
   idle: "IDLE",
   running: "RUNNING",
@@ -221,11 +227,25 @@ const STATE_LABELS: Record<WatcherExecutionState | "unknown", string> = {
 };
 
 /** Compact progress line for in-flight observations (rate-bounded by tool). */
-export function formatObservationProgress(observation: WatcherObservation): string {
+export function formatObservationProgress(
+  observation: WatcherObservation,
+  selector: { generation?: number | null; afterGeneration?: number | null } = {},
+): string {
   const generation = ` gen=${observation.status.generation}`;
   const freshness = ` freshness=${observation.freshness}`;
   const polled = observation.source === "polled" ? " (polled)" : "";
   const label = STATE_LABELS[observation.status.state] ?? "UNKNOWN";
+  if (selector.generation !== null && selector.generation !== undefined) {
+    return `${label}${generation} waitingForGeneration=${selector.generation}${freshness}${polled}`;
+  }
+  if (selector.afterGeneration !== null && selector.afterGeneration !== undefined) {
+    const waitingLabel =
+      observation.status.generation <= selector.afterGeneration &&
+      isTerminalState(observation.status.state)
+        ? "WAITING"
+        : label;
+    return `${waitingLabel}${generation} waitingForGeneration>${selector.afterGeneration}${freshness}${polled}`;
+  }
   return `${label}${generation}${freshness}${polled}`;
 }
 

@@ -51,6 +51,21 @@ export async function requestObservation(
   deps: ObserveDeps,
 ): Promise<WatcherObservationResult> {
   const now = deps.now ?? Date.now;
+  if (!request.wait && request.generation !== null && request.generation !== undefined) {
+    throw new Error(
+      "`generation` requires `wait: true`; use watcher_observe without a selector for snapshots",
+    );
+  }
+  if (
+    request.generation !== null &&
+    request.generation !== undefined &&
+    request.afterGeneration !== null &&
+    request.afterGeneration !== undefined
+  ) {
+    throw new Error(
+      "`generation` and `afterGeneration` are mutually exclusive; choose one selector",
+    );
+  }
   const timeoutMs = request.timeoutMs ?? (request.wait ? 120_000 : 10_000);
   const startedAt = now();
   const deadline = startedAt + timeoutMs;
@@ -116,12 +131,28 @@ export async function requestObservation(
     let anchor: number | null = null;
     let latched: number | null = null;
     const afterGeneration = request.afterGeneration ?? null;
+    const exactGeneration = request.generation ?? null;
 
     for await (const observation of deps.port.open(controller.signal)) {
       if (now() >= deadline) return finish("timeout", last ?? observation);
       last = observation;
       if (request.wait) deps.onObservation?.(observation);
       else return completion("snapshot", observation);
+
+      if (exactGeneration !== null) {
+        if (observation.status.generation > exactGeneration) {
+          return finish("superseded", observation, {
+            supersedingGeneration: observation.status.generation,
+          });
+        }
+        if (
+          observation.status.generation === exactGeneration &&
+          isTerminal(observation.status.state)
+        ) {
+          return completion("terminal", observation);
+        }
+        continue;
+      }
 
       if (afterGeneration !== null) {
         // Fresh mode: wait for the first generation newer than the anchor,

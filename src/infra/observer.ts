@@ -128,8 +128,8 @@ function waitForConnect(socket: Socket, signal: AbortSignal): Promise<void> {
     const onError = (error: Error): void => settle(error);
     const onConnect = (): void => settle();
     const onAbort = (): void => {
-      socket.destroy();
       settle(new Error(SUBSCRIPTION_ABORT_MESSAGE));
+      socket.destroy();
     };
 
     if (signal.aborted) {

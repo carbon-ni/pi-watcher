@@ -119,6 +119,15 @@ describe("createPollingPort", () => {
 });
 
 describe("createSubscriptionPort", () => {
+  test("preserves connection errors when the socket cannot connect", async () => {
+    const port = createSubscriptionPort(join(tmpdir(), `funzzy-missing-${process.pid}.sock`));
+
+    await assert.rejects(
+      () => port.open(new AbortController().signal).next(),
+      /ENOENT|ECONNREFUSED/,
+    );
+  });
+
   test("rejects an already-aborted connection with a stable cancellation error", async () => {
     const controller = new AbortController();
     controller.abort();

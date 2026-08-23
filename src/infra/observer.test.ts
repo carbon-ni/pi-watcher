@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { EventEmitter } from "node:events";
 import { mkdtemp, rm } from "node:fs/promises";
 import { createServer } from "node:net";
 import type { Socket } from "node:net";
@@ -6,7 +7,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, describe, test, vi } from "vitest";
 
-import { createPollingPort, createSubscriptionPort } from "./observer.js";
+import { createPollingPort, createSubscriptionPort, waitForConnect } from "./observer.js";
 import type { WatcherStatus } from "../domain/watcher.js";
 
 const STATUS: WatcherStatus = {
@@ -54,6 +55,14 @@ async function withSocketServer(
       server.close((error) => (error ? reject(error) : resolve())),
     );
     await rm(directory, { recursive: true, force: true });
+  }
+}
+
+class FakeSocket extends EventEmitter {
+  destroyed = false;
+
+  destroy(): void {
+    this.destroyed = true;
   }
 }
 
@@ -119,6 +128,48 @@ describe("createPollingPort", () => {
 });
 
 describe("createSubscriptionPort", () => {
+  test("cleans handshake listeners before destroying on abort", async () => {
+    const socket = new FakeSocket();
+    const controller = new AbortController();
+    const pending = waitForConnect(socket as unknown as Socket, controller.signal);
+
+    controller.abort();
+
+    await assert.rejects(pending, /Funzzy subscription connection aborted/);
+    assert.equal(socket.listenerCount("connect"), 0);
+    assert.equal(socket.listenerCount("error"), 0);
+    assert.equal(socket.destroyed, true);
+    socket.emit("connect");
+  });
+
+  test("preserves the original connection error and cleans listeners", async () => {
+    const socket = new FakeSocket();
+    const controller = new AbortController();
+    const pending = waitForConnect(socket as unknown as Socket, controller.signal);
+    const error = new Error("connect failed");
+
+    socket.emit("error", error);
+
+    await assert.rejects(pending, error);
+    assert.equal(socket.listenerCount("connect"), 0);
+    assert.equal(socket.listenerCount("error"), 0);
+    assert.equal(socket.destroyed, false);
+  });
+
+  test("connect wins a race when it settles before abort", async () => {
+    const socket = new FakeSocket();
+    const controller = new AbortController();
+    const pending = waitForConnect(socket as unknown as Socket, controller.signal);
+
+    socket.emit("connect");
+    controller.abort();
+
+    await pending;
+    assert.equal(socket.listenerCount("connect"), 0);
+    assert.equal(socket.listenerCount("error"), 0);
+    assert.equal(socket.destroyed, false);
+  });
+
   test("preserves connection errors when the socket cannot connect", async () => {
     const port = createSubscriptionPort(join(tmpdir(), `funzzy-missing-${process.pid}.sock`));
 

@@ -109,7 +109,7 @@ function observationFromSnapshot(
 
 const SUBSCRIPTION_ABORT_MESSAGE = "Funzzy subscription connection aborted";
 
-function waitForConnect(socket: Socket, signal: AbortSignal): Promise<void> {
+export function waitForConnect(socket: Socket, signal: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
     let settled = false;
 

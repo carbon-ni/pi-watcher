@@ -236,7 +236,7 @@ describe("decodeWatcherCorrelatedSnapshot", () => {
         ...minimum,
         tasks: [{ id: "t-1", name: "test", state: "green" }],
       }),
-    ).toThrow(/task at index 0: "state" must be one of passed, failed, cancelled/);
+    ).toThrow(/task at index 0: "state" must be one of passed, failed, cancelled, timedout/);
   });
 
   it("rejects a malformed snapshot identity", () => {

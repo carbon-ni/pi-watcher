@@ -77,7 +77,7 @@ export interface WatcherCapabilityProfile {
 }
 
 export const WATCHER_FRESHNESS_VALUES = ["current", "stale", "unknown"] as const;
-export const WATCHER_TASK_STATES = ["passed", "failed", "cancelled"] as const;
+export const WATCHER_TASK_STATES = ["passed", "failed", "cancelled", "timedout"] as const;
 
 export type WatcherTaskState = (typeof WATCHER_TASK_STATES)[number];
 

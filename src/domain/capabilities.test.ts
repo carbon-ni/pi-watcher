@@ -143,7 +143,7 @@ describe("decodeWatcherCorrelatedSnapshot", () => {
     freshness: "current",
   };
 
-  it("decodes a minimal correlated snapshot with defaults", () => {
+  it("decodes a correlated snapshot with defaults", () => {
     expect(decodeWatcherCorrelatedSnapshot(minimum)).toEqual({
       instance: { token: "fz-7f3a", startedAtEpochMs: null },
       generation: 4,
@@ -161,6 +161,19 @@ describe("decodeWatcherCorrelatedSnapshot", () => {
       effectiveConcurrency: 1,
       concurrencySource: "config",
     });
+  });
+
+  it("positively decodes the additive timedout task state", () => {
+    // FINITE-JOB-TIMEOUT-CONTRACT §9: the decoder union must accept the
+    // additive "timedout" value, not merely reject a different error string
+    // (positive decode, per QA gap).
+    const snapshot = decodeWatcherCorrelatedSnapshot({
+      ...minimum,
+      tasks: [{ id: "t-1", name: "await-remote", state: "timedout", durationMs: 3_000 }],
+    });
+    expect(snapshot.tasks).toEqual([
+      { id: "t-1", name: "await-remote", state: "timedout", durationMs: 3_000 },
+    ]);
   });
 
   it("decodes the golden full correlated snapshot fixture", () => {

@@ -52,6 +52,7 @@ function createPi() {
       },
     ),
     registerCommand: vi.fn(() => undefined),
+    registerShortcut: vi.fn(() => undefined),
     getActiveTools: () => [...activeTools],
     setActiveTools: (names: string[]) => {
       activeTools.clear();

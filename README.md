@@ -26,6 +26,22 @@ make try
 
 `make all` is definition of done: format, lint, typecheck, coverage budgets (80% statements, 85% lines, 90% functions, and 70% branches), and dependency audit must pass.
 
+## Keyboard shortcut
+
+Press **Ctrl+Shift+Alt+F** (`ctrl+shift+alt+f`) to start the default Funzzy
+`@agent-final` gate when the watcher is configured and available. If a
+conversation is already running a generation, the shortcut reports that it is
+deferred, waits for that generation to finish, and starts exactly one new gate.
+A repeated press while that shortcut's generation is pending or running is
+ignored with visible feedback. The shortcut never triggers or cancels work
+when `.watch.yaml`/`on.socket` is absent or the control socket is unavailable;
+it reports the configuration or connection error instead.
+
+To change the key, update `DEFAULT_FINAL_GATE_SHORTCUT` in
+`src/commands.ts` and reload the extension. There is deliberately no second
+per-target shortcut or Rust protocol setting; the shortcut uses the same
+`run` request and `@agent-final` target as the existing verification path.
+
 ## Pi package
 
 `package.json#pi.extensions` exposes `./src/index.ts`. During development:

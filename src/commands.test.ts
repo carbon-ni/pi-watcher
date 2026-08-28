@@ -123,6 +123,7 @@ function createStatusHarness() {
     }),
     registerTool: vi.fn(),
     registerCommand: vi.fn(),
+    registerShortcut: vi.fn(),
     sendMessage: vi.fn(),
   };
   const ctx = {
@@ -148,6 +149,7 @@ function createCommandHarness() {
   const pi = {
     on: vi.fn(),
     registerTool: vi.fn(),
+    registerShortcut: vi.fn(),
     registerCommand: vi.fn(
       (
         name: string,
@@ -178,7 +180,9 @@ describe("funzzyStatus registration", () => {
     const handlers = new Map<string, (...args: never[]) => Promise<void>>();
     const registeredTools: string[] = [];
     const activeTools = new Set(["read", "bash", "edit", "write"]);
+    const shortcuts = new Map<string, { handler: (ctx: never) => Promise<void> }>();
     const setStatus = vi.fn();
+    const notify = vi.fn();
     const pi = {
       on: vi.fn((event: string, handler: (...args: never[]) => Promise<void>) => {
         handlers.set(event, handler);
@@ -188,6 +192,11 @@ describe("funzzyStatus registration", () => {
         activeTools.add(tool.name);
       }),
       registerCommand: vi.fn(),
+      registerShortcut: vi.fn(
+        (shortcut: string, options: { handler: (ctx: never) => Promise<void> }) => {
+          shortcuts.set(shortcut, options);
+        },
+      ),
       sendMessage: vi.fn(),
       getActiveTools: () => [...activeTools],
       setActiveTools: (names: string[]) => {
@@ -203,12 +212,13 @@ describe("funzzyStatus registration", () => {
       sessionManager: { getSessionId: () => "session-1" },
       ui: {
         setStatus,
+        notify,
         theme: { fg: (color: string, text: string) => `${color}:${text}` },
       },
     };
 
     funzzyStatus(pi as never);
-    return { ctx, handlers, pi, registeredTools, activeTools, setStatus };
+    return { ctx, handlers, pi, registeredTools, activeTools, setStatus, shortcuts, notify };
   }
 
   it("does not register watcher tools at extension load", () => {
@@ -309,11 +319,103 @@ describe("funzzyStatus registration", () => {
     expect(setStatus).toHaveBeenLastCalledWith("watcher-status", undefined);
   });
 
+  it("registers the default final-gate keyboard shortcut", () => {
+    const { shortcuts } = createRegistrationHarness();
+
+    expect(shortcuts.has("ctrl+shift+alt+f")).toBe(true);
+    expect(shortcuts.get("ctrl+shift+alt+f")?.handler).toBeTypeOf("function");
+  });
+
+  it("triggers @agent-final immediately when the watcher is not running", async () => {
+    const { ctx, shortcuts, notify } = createRegistrationHarness();
+
+    await shortcuts.get("ctrl+shift+alt+f")!.handler(ctx as never);
+
+    expect(requestRun).toHaveBeenCalledWith("/tmp/funzzy.sock", "@agent-final");
+    expect(notify).toHaveBeenCalledWith(
+      "Funzzy final gate started: @agent-final generation 10",
+      "info",
+    );
+  });
+
+  it("waits for a busy generation before triggering exactly once", async () => {
+    const { ctx, shortcuts, notify } = createRegistrationHarness();
+    queryStatus
+      .mockResolvedValueOnce({ ...status, state: "running", generation: 7 })
+      .mockResolvedValueOnce({ ...status, state: "passed", generation: 7 });
+
+    await shortcuts.get("ctrl+shift+alt+f")!.handler(ctx as never);
+
+    expect(requestRun).toHaveBeenCalledTimes(1);
+    expect(notify).toHaveBeenNthCalledWith(
+      1,
+      "Funzzy final gate accepted; waiting for generation 7 to finish",
+      "info",
+    );
+    expect(requestRun).toHaveBeenCalledWith("/tmp/funzzy.sock", "@agent-final");
+  });
+
+  it("gives one clear error and does nothing when the watcher socket is unavailable", async () => {
+    const { ctx, shortcuts, notify } = createRegistrationHarness();
+    queryStatus.mockRejectedValueOnce(new Error("socket unavailable"));
+
+    await shortcuts.get("ctrl+shift+alt+f")!.handler(ctx as never);
+
+    expect(requestRun).not.toHaveBeenCalled();
+    expect(notify).toHaveBeenCalledTimes(1);
+    expect(notify).toHaveBeenCalledWith("socket unavailable", "error");
+  });
+
+  it("ignores a duplicate press while the first trigger is pending", async () => {
+    const { ctx, shortcuts, notify } = createRegistrationHarness();
+    let resolveRun!: (generation: number) => void;
+    requestRun.mockReturnValueOnce(new Promise((resolve) => (resolveRun = resolve)));
+
+    const first = shortcuts.get("ctrl+shift+alt+f")!.handler(ctx as never);
+    await Promise.resolve();
+    const second = shortcuts.get("ctrl+shift+alt+f")!.handler(ctx as never);
+    await second;
+    resolveRun(10);
+    await first;
+
+    expect(requestRun).toHaveBeenCalledTimes(1);
+    expect(notify).toHaveBeenCalledWith(
+      "Funzzy final gate shortcut is already pending; ignoring duplicate",
+      "info",
+    );
+  });
+
+  it("ignores a second press while the triggered generation is running", async () => {
+    const { ctx, shortcuts, notify } = createRegistrationHarness();
+
+    await shortcuts.get("ctrl+shift+alt+f")!.handler(ctx as never);
+    queryStatus.mockResolvedValueOnce({ ...status, generation: 10, state: "running" });
+    await shortcuts.get("ctrl+shift+alt+f")!.handler(ctx as never);
+
+    expect(requestRun).toHaveBeenCalledTimes(1);
+    expect(notify).toHaveBeenLastCalledWith(
+      "Funzzy final gate is already pending or running (generation 10)",
+      "info",
+    );
+  });
+
+  it("allows a new shortcut run after the watcher restarts with a lower generation", async () => {
+    const { ctx, shortcuts } = createRegistrationHarness();
+
+    await shortcuts.get("ctrl+shift+alt+f")!.handler(ctx as never);
+    queryStatus.mockResolvedValueOnce({ ...status, generation: 1, state: "passed" });
+    await shortcuts.get("ctrl+shift+alt+f")!.handler(ctx as never);
+
+    expect(requestRun).toHaveBeenCalledTimes(2);
+    expect(requestRun).toHaveBeenNthCalledWith(2, "/tmp/funzzy.sock", "@agent-final");
+  });
+
   it("registers watcher-prefixed slash commands without session_start", () => {
     const commands: string[] = [];
     const pi = {
       on: vi.fn(),
       registerTool: vi.fn(),
+      registerShortcut: vi.fn(),
       registerCommand: vi.fn((name: string) => commands.push(name)),
     };
 
@@ -333,6 +435,7 @@ describe("funzzyStatus registration", () => {
     const pi = {
       on: vi.fn(),
       registerTool: vi.fn(),
+      registerShortcut: vi.fn(),
       registerCommand: vi.fn((name: string) => commands.push(name)),
     };
 

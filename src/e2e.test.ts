@@ -456,9 +456,14 @@ type RegisteredTool = {
   execute: (...args: unknown[]) => Promise<unknown>;
 };
 
+type RegisteredShortcut = {
+  handler: (ctx: unknown) => Promise<void> | void;
+};
+
 function createPi() {
   const tools: RegisteredTool[] = [];
   const commands: unknown[] = [];
+  const shortcuts = new Map<string, RegisteredShortcut>();
   const activeTools = new Set<string>();
   const handlers = new Map<string, (event: unknown, ctx: unknown) => unknown>();
   const sendMessage = vi.fn();
@@ -471,6 +476,9 @@ function createPi() {
       activeTools.add(tool.name);
     }),
     registerCommand: vi.fn((command: unknown) => commands.push(command)),
+    registerShortcut: vi.fn((shortcut: string, options: RegisteredShortcut) => {
+      shortcuts.set(shortcut, options);
+    }),
     getActiveTools: () => [...activeTools],
     setActiveTools: (names: string[]) => {
       activeTools.clear();
@@ -497,7 +505,7 @@ function createPi() {
     ),
     sendMessage,
   };
-  return { pi, tools, commands, handlers, sendMessage };
+  return { pi, tools, commands, shortcuts, handlers, sendMessage };
 }
 
 type ToolResult = {
@@ -554,14 +562,14 @@ function createCtx(cwd: string, sessionId = "session-1") {
     isProjectTrusted: () => true,
     isIdle: () => true,
     sessionManager: { getSessionId: () => sessionId },
-    ui: { setStatus: vi.fn(), theme: { fg: () => "" } },
+    ui: { setStatus: vi.fn(), notify: vi.fn(), theme: { fg: () => "" } },
   };
 }
 
 async function createHarness() {
   const { server, socketPath, cleanup: cleanupServer } = await FakeWatcherServer.start();
   const worktree = await createWorktree(socketPath);
-  const { pi, tools, commands, handlers, sendMessage } = createPi();
+  const { pi, tools, commands, shortcuts, handlers, sendMessage } = createPi();
   funzzyStatus(pi as never);
   const ctx = createCtx(worktree.dir);
   const tool = (name: string): RegisteredTool => {
@@ -580,6 +588,11 @@ async function createHarness() {
     handlers.get("tool_call")!(event, ctx) as Promise<unknown>;
   const toolResult = (event: Record<string, unknown>): Promise<unknown> =>
     handlers.get("tool_result")!(event, ctx) as Promise<unknown>;
+  const shortcut = (name: string): RegisteredShortcut => {
+    const entry = shortcuts.get(name);
+    if (entry === undefined) throw new Error(`Shortcut ${name} not registered`);
+    return entry;
+  };
   return {
     server,
     socketPath,
@@ -587,8 +600,10 @@ async function createHarness() {
     pi,
     tools,
     commands,
+    shortcuts,
     handlers,
     sendMessage,
+    shortcut,
     ctx,
     tool,
     sessionStart,
@@ -626,6 +641,32 @@ afterEach(() => {
 });
 
 describe("agent watcher feedback loop (end to end)", () => {
+  it("keyboard shortcut triggers the default final gate through the real control socket", async () => {
+    const h = await createHarness();
+    try {
+      h.server.setStatus({
+        generation: 5,
+        state: "passed",
+        trigger: "src/main.ts",
+        commands: ["make all"],
+        durationMs: 42,
+      });
+      await h.sessionStart();
+      h.server.setNextRun({ trigger: "src/main.ts", commands: ["make all"] });
+
+      await h.shortcut("ctrl+shift+alt+f").handler(h.ctx);
+
+      expect(h.server.calls).toContain("run");
+      expect(h.ctx.ui.notify).toHaveBeenCalledWith(
+        "Funzzy final gate started: @agent-final generation 6",
+        "info",
+      );
+      h.server.completeRun({ outcome: "passed", durationMs: 12 });
+    } finally {
+      await h.cleanup();
+    }
+  });
+
   it("fresh observation progress distinguishes excluded baseline from selected generation", async () => {
     const h = await createHarness();
     try {

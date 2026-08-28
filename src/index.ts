@@ -188,6 +188,7 @@ export default function funzzyStatus(pi: ExtensionAPI) {
     formatStatus,
     listTargets,
     queryStatus,
+    requestRun,
     readResponder,
     setPinnedResponder,
     clearPinnedResponder,

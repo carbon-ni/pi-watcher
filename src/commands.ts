@@ -1,4 +1,5 @@
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
+import { SupersededRunError, waitForRun } from "./application/stable-run.js";
 import type { WatcherStatus, WatcherTarget } from "./domain/watcher.js";
 import type { Responder } from "./infra/ownership.js";
 import { TrustedConfigError, type RequireTrustedConfig } from "./trusted-config.js";
@@ -9,6 +10,7 @@ export interface CommandDeps {
   formatStatus: (status: WatcherStatus) => string;
   listTargets: (socketPath: string, timeoutMs?: number) => Promise<WatcherTarget[]>;
   queryStatus: (socketPath: string, timeoutMs?: number) => Promise<WatcherStatus>;
+  requestRun: (socketPath: string, target: string, timeoutMs?: number) => Promise<number>;
   readResponder: (socketPath: string) => Promise<Responder | null>;
   setPinnedResponder: (socketPath: string, sessionId: string) => Promise<void>;
   clearPinnedResponder: (socketPath: string) => Promise<void>;
@@ -19,7 +21,65 @@ export interface CommandDeps {
   connectWatcher: (ctx: ExtensionCommandContext) => Promise<void>;
 }
 
+export const DEFAULT_FINAL_GATE_SHORTCUT = "ctrl+shift+alt+f" as const;
+const SHORTCUT_WAIT_TIMEOUT_MS = 120_000;
+
 export function registerCommands(pi: ExtensionAPI, deps: CommandDeps): void {
+  let shortcutPending = false;
+  let triggeredGeneration: number | null = null;
+  pi.registerShortcut(DEFAULT_FINAL_GATE_SHORTCUT, {
+    description: "Run the default Funzzy @agent-final gate when the watcher is idle",
+    handler: async (ctx) => {
+      if (shortcutPending) {
+        ctx.ui.notify("Funzzy final gate shortcut is already pending; ignoring duplicate", "info");
+        return;
+      }
+      shortcutPending = true;
+      try {
+        const config = await deps.requireTrustedConfig(ctx);
+        let status = await deps.queryStatus(config.socketPath);
+        if (triggeredGeneration !== null) {
+          if (status.generation >= triggeredGeneration && status.state === "running") {
+            ctx.ui.notify(
+              `Funzzy final gate is already pending or running (generation ${triggeredGeneration})`,
+              "info",
+            );
+            return;
+          }
+          // A lower generation identifies a watcher restart. Do not let the
+          // previous process's generation suppress future shortcut presses.
+          triggeredGeneration = null;
+        }
+        if (status.state === "running") {
+          ctx.ui.notify(
+            `Funzzy final gate accepted; waiting for generation ${status.generation} to finish`,
+            "info",
+          );
+          while (status.state === "running") {
+            try {
+              status = await waitForRun(
+                status.generation,
+                SHORTCUT_WAIT_TIMEOUT_MS,
+                () => deps.queryStatus(config.socketPath),
+                Math.min(config.pollIntervalMs, 250),
+              );
+            } catch (error) {
+              if (!(error instanceof SupersededRunError)) throw error;
+              status = await deps.queryStatus(config.socketPath);
+            }
+          }
+        }
+        const generation = await deps.requestRun(config.socketPath, "@agent-final");
+        triggeredGeneration = generation;
+        ctx.ui.notify(`Funzzy final gate started: @agent-final generation ${generation}`, "info");
+      } catch (error) {
+        notifyCommandError(ctx, error);
+      } finally {
+        shortcutPending = false;
+      }
+    },
+  });
+
   pi.registerCommand("watcher-targets", {
     description: "List targets from the project's Funzzy control socket",
     handler: async (_args, ctx) => {
@@ -122,7 +182,11 @@ export function registerCommands(pi: ExtensionAPI, deps: CommandDeps): void {
   });
 }
 
-function notifyCommandError(ctx: ExtensionCommandContext, error: unknown): void {
+type NotifyContext = {
+  ui: { notify(message: string, level: "info" | "warning" | "error"): void };
+};
+
+function notifyCommandError(ctx: NotifyContext, error: unknown): void {
   if (error instanceof TrustedConfigError) {
     ctx.ui.notify(error.message, "warning");
     return;

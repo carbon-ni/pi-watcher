@@ -1,6 +1,7 @@
-import { readFile } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
 import { isAbsolute, join, resolve } from "node:path";
 import { parse } from "yaml";
+import type { WatcherConfigPresence } from "../domain/watcher-gate.js";
 
 export interface FunzzyConfig {
   socketPath: string;
@@ -31,6 +32,23 @@ function validateConfig(cwd: string, path: string, socketPath: unknown): FunzzyC
     socketPath: isAbsolute(socketPath) ? socketPath : resolve(cwd, socketPath),
     pollIntervalMs: 1_000,
   };
+}
+
+/** Existence-only adapter for the lazy-registration gate: never parses content. */
+export async function readConfigPresence(cwd: string): Promise<WatcherConfigPresence> {
+  const watchYaml = await fileExists(join(cwd, ".watch.yaml"));
+  const watchYml = await fileExists(join(cwd, ".watch.yml"));
+  return { watchYaml, watchYml };
+}
+
+async function fileExists(path: string): Promise<boolean> {
+  try {
+    await stat(path);
+    return true;
+  } catch (error) {
+    if (isMissingFile(error)) return false;
+    throw error;
+  }
 }
 
 async function readOptionalFile(path: string): Promise<string | null> {

@@ -29,7 +29,7 @@ Do not restore deprecated `funzzy_*` or `/funzzy-*` names. Funzzy remains infras
 
 ## Task routes
 
-- Public Pi behavior or lifecycle: start at `src/index.ts`; test registration in `src/commands.test.ts`.
+- Public Pi behavior or lifecycle: start at `src/index.ts`; test registration in `src/commands.test.ts`. The watcher tool surface is registered lazily by `src/registration.ts` from `session_start` (presence-only gate in `src/domain/watcher-gate.ts`, existence adapter in `src/infra/config.ts`); commands stay top-level. Pi cannot unregister dynamic tools — registered `watcher_*` tools stay in `pi.getAllTools()` for the session, so a closed gate deactivates them via `setActiveTools` and a reopened gate re-activates the same registrations.
 - The end-to-end feedback loop: `src/e2e.test.ts` drives the real composition root against a scripted protocol server on a real Unix socket with a real git worktree — extend it when the loop contract changes.
 - Stable verification behavior: change `src/application/stable-run.ts` and colocated test.
 - Status/target/failure policy: change `src/domain/` and colocated tests.

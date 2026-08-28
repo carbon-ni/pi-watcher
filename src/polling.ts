@@ -46,6 +46,8 @@ export interface PollingDeps {
 
 export interface PollingLifecycle {
   sessionStart(event: SessionStartEvent, ctx: ExtensionContext): Promise<void>;
+  /** Dispose lifecycle state and clear the status bar without starting anything. */
+  reset(ctx: ExtensionContext): Promise<void>;
   toolCall(event: ToolCallEvent, ctx: ExtensionContext): Promise<void>;
   toolResult(event: ToolResultEvent, ctx: ExtensionContext): Promise<void>;
   agentSettled(): Promise<void>;
@@ -153,7 +155,16 @@ export function createPollingLifecycle(pi: ExtensionAPI, deps: PollingDeps): Pol
   const beginSession = async (ctx: ExtensionContext): Promise<void> => {
     resetSessionState();
     if (!ctx.isProjectTrusted()) return;
-    const config = await deps.readConfig(ctx.cwd);
+    if (ctx.hasUI) ctx.ui.setStatus(STATUS_KEY, undefined);
+
+    let config: FunzzyConfig | null;
+    try {
+      config = await deps.readConfig(ctx.cwd);
+    } catch {
+      // Keep the extension alive for malformed or unreadable project config.
+      // Tool and command calls retain the detailed config error path.
+      return;
+    }
     if (!config || !ctx.hasUI) return;
 
     const sessionId = ctx.sessionManager.getSessionId();
@@ -168,6 +179,11 @@ export function createPollingLifecycle(pi: ExtensionAPI, deps: PollingDeps): Pol
   return {
     async sessionStart(_event, ctx) {
       await beginSession(ctx);
+    },
+
+    async reset(ctx) {
+      resetSessionState();
+      if (ctx.hasUI) ctx.ui.setStatus(STATUS_KEY, undefined);
     },
 
     async toolCall(event, ctx) {
@@ -202,8 +218,7 @@ export function createPollingLifecycle(pi: ExtensionAPI, deps: PollingDeps): Pol
     },
 
     async sessionShutdown(ctx) {
-      resetSessionState();
-      ctx.ui.setStatus(STATUS_KEY, undefined);
+      await this.reset(ctx);
     },
 
     async disconnect(ctx) {

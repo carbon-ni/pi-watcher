@@ -209,7 +209,7 @@ describe("session start", () => {
     await lifecycle.sessionStart({} as never, ctx as never);
 
     expect(deps.queryStatus).not.toHaveBeenCalled();
-    expect(setStatus).not.toHaveBeenCalled();
+    expect(setStatus).toHaveBeenCalledWith("watcher-status", undefined);
   });
 
   it("does not observe when there is no UI", async () => {

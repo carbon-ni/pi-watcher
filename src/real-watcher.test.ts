@@ -36,13 +36,22 @@ type RegisteredTool = {
 
 function createPi() {
   const tools: RegisteredTool[] = [];
+  const activeTools = new Set<string>();
   const handlers = new Map<string, (event: unknown, ctx: unknown) => unknown>();
   const pi = {
     on: vi.fn((name: string, handler: (event: unknown, ctx: unknown) => unknown) => {
       handlers.set(name, handler);
     }),
-    registerTool: vi.fn((tool: RegisteredTool) => tools.push(tool)),
+    registerTool: vi.fn((tool: RegisteredTool) => {
+      tools.push(tool);
+      activeTools.add(tool.name);
+    }),
     registerCommand: vi.fn(),
+    getActiveTools: () => [...activeTools],
+    setActiveTools: (names: string[]) => {
+      activeTools.clear();
+      for (const name of names) activeTools.add(name);
+    },
     exec: vi.fn((command: string, args: string[], options: { cwd: string; timeout: number }) => {
       try {
         const result = execFileSync(command, args, {
@@ -139,6 +148,9 @@ describe.skipIf(!binaryAvailable)("real watcher binary (legacy fallback)", () =>
       };
       const run = (name: string, params: Record<string, unknown>): Promise<unknown> =>
         tool(name).execute("1", params, undefined, undefined, ctx);
+
+      // Real Pi fires session_start before any tool is callable (lazy gate).
+      await handlers.get("session_start")!(undefined, ctx);
 
       // Legacy negotiation: capabilities answers -32601 -> legacy profile.
       const observe = (await run("watcher_observe", { wait: false })) as {

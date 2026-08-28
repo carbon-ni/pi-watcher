@@ -45,6 +45,7 @@ No module in `domain/` imports `application/`, `infra/`, or Pi. Application impo
 ### Composition root
 
 - `index.ts`: registers Pi tools, commands, and lifecycle handlers; injects concrete callbacks into application/domain behavior.
+- `registration.ts`: lazy, idempotent watcher-surface registration. `session_start` gates the tools and lifecycle on the presence-only predicate `domain/watcher-gate.ts` (`.watch.yaml`/`.watch.yml` existence, never parsed); slash commands stay globally registered because they cost no model context and their handlers surface config errors. Pi cannot unregister dynamic tools — they stay in `pi.getAllTools()` for the session — so a closed gate deactivates the watcher tools via `setActiveTools` instead, and a reopened gate re-activates them.
 
 Tests remain colocated with each layer (`*.test.ts`).
 

@@ -14,6 +14,8 @@ const {
   recordAutomaticResponder,
   disconnectSession,
   connectSession,
+  readConfig,
+  readConfigPresence,
 } = vi.hoisted(() => {
   const status = {
     generation: 7,
@@ -35,11 +37,14 @@ const {
     recordAutomaticResponder: vi.fn(),
     disconnectSession: vi.fn(),
     connectSession: vi.fn(),
+    readConfig: vi.fn(),
+    readConfigPresence: vi.fn(),
   };
 });
 
 vi.mock("./infra/config.js", () => ({
-  readConfig: vi.fn().mockResolvedValue({ socketPath: "/tmp/funzzy.sock", pollIntervalMs: 1_000 }),
+  readConfig,
+  readConfigPresence,
 }));
 vi.mock("./infra/client.js", () => ({
   formatStatus,
@@ -87,6 +92,10 @@ vi.mock("./infra/membership.js", () => ({
 }));
 
 beforeEach(() => {
+  readConfig
+    .mockReset()
+    .mockResolvedValue({ socketPath: "/tmp/funzzy.sock", pollIntervalMs: 1_000 });
+  readConfigPresence.mockReset().mockResolvedValue({ watchYaml: true, watchYml: false });
   queryStatus.mockReset().mockResolvedValue(status);
   formatStatus.mockReset().mockReturnValue("PASS gen=7");
   listTargets.mockReset().mockResolvedValue([{ name: "lint", commands: ["npm run lint"] }]);
@@ -164,17 +173,57 @@ function createCommandHarness() {
 }
 
 describe("funzzyStatus registration", () => {
-  it("registers watcher-prefixed tools", () => {
-    const tools: string[] = [];
+  function createRegistrationHarness() {
+    vi.useFakeTimers();
+    const handlers = new Map<string, (...args: never[]) => Promise<void>>();
+    const registeredTools: string[] = [];
+    const activeTools = new Set(["read", "bash", "edit", "write"]);
+    const setStatus = vi.fn();
     const pi = {
-      on: vi.fn(),
-      registerTool: vi.fn((tool: { name: string }) => tools.push(tool.name)),
+      on: vi.fn((event: string, handler: (...args: never[]) => Promise<void>) => {
+        handlers.set(event, handler);
+      }),
+      registerTool: vi.fn((tool: { name: string }) => {
+        registeredTools.push(tool.name);
+        activeTools.add(tool.name);
+      }),
       registerCommand: vi.fn(),
+      sendMessage: vi.fn(),
+      getActiveTools: () => [...activeTools],
+      setActiveTools: (names: string[]) => {
+        activeTools.clear();
+        for (const name of names) activeTools.add(name);
+      },
+    };
+    const ctx = {
+      cwd: "/project",
+      hasUI: true,
+      isProjectTrusted: () => true,
+      isIdle: () => true,
+      sessionManager: { getSessionId: () => "session-1" },
+      ui: {
+        setStatus,
+        theme: { fg: (color: string, text: string) => `${color}:${text}` },
+      },
     };
 
     funzzyStatus(pi as never);
+    return { ctx, handlers, pi, registeredTools, activeTools, setStatus };
+  }
 
-    expect(tools).toEqual([
+  it("does not register watcher tools at extension load", () => {
+    const { registeredTools } = createRegistrationHarness();
+
+    expect(registeredTools).toEqual([]);
+  });
+
+  it("registers watcher-prefixed tools on session_start when .watch.yaml exists", async () => {
+    readConfigPresence.mockResolvedValue({ watchYaml: true, watchYml: false });
+    const { ctx, handlers, registeredTools } = createRegistrationHarness();
+
+    await handlers.get("session_start")?.({} as never, ctx as never);
+
+    expect(registeredTools).toEqual([
       "watcher_status",
       "watcher_targets",
       "watcher_observe",
@@ -182,12 +231,85 @@ describe("funzzyStatus registration", () => {
       "watcher_cancel",
       "watcher_verify",
     ]);
-    expect(tools).not.toContain("funzzy_status");
-    expect(tools).not.toContain("funzzy_targets");
-    expect(tools).not.toContain("funzzy_verify");
+    expect(registeredTools).not.toContain("funzzy_status");
+    expect(registeredTools).not.toContain("funzzy_targets");
+    expect(registeredTools).not.toContain("funzzy_verify");
   });
 
-  it("registers watcher-prefixed slash commands", () => {
+  it("registers watcher tools on session_start when only .watch.yml exists", async () => {
+    readConfigPresence.mockResolvedValue({ watchYaml: false, watchYml: true });
+    const { ctx, handlers, registeredTools } = createRegistrationHarness();
+
+    await handlers.get("session_start")?.({} as never, ctx as never);
+
+    expect(registeredTools).toHaveLength(6);
+  });
+
+  it("registers nothing, starts no polling, and clears status without a contract file", async () => {
+    readConfigPresence.mockResolvedValue({ watchYaml: false, watchYml: false });
+    const { ctx, handlers, registeredTools, setStatus } = createRegistrationHarness();
+
+    await handlers.get("session_start")?.({} as never, ctx as never);
+
+    expect(registeredTools).toEqual([]);
+    expect(queryStatus).not.toHaveBeenCalled();
+    expect(setStatus).toHaveBeenCalledWith("watcher-status", undefined);
+  });
+
+  it("registers tools once across repeated session_start fires", async () => {
+    const { ctx, handlers, pi } = createRegistrationHarness();
+
+    await handlers.get("session_start")?.({} as never, ctx as never);
+    await handlers.get("session_start")?.({} as never, ctx as never);
+
+    expect(pi.registerTool).toHaveBeenCalledTimes(6);
+  });
+
+  it("still registers tools when on.socket is missing so config errors stay reachable", async () => {
+    const { readConfig } = await import("./infra/config.js");
+    vi.mocked(readConfig).mockResolvedValueOnce(null);
+    const { ctx, handlers, registeredTools } = createRegistrationHarness();
+
+    await handlers.get("session_start")?.({} as never, ctx as never);
+
+    expect(registeredTools).toHaveLength(6);
+    expect(queryStatus).not.toHaveBeenCalled();
+  });
+
+  it("keeps tools available and clears stale status when the contract is malformed", async () => {
+    const { ctx, handlers, registeredTools, setStatus } = createRegistrationHarness();
+
+    await handlers.get("session_start")?.({} as never, ctx as never);
+    readConfig.mockRejectedValueOnce(new Error(".watch.yaml: malformed YAML"));
+
+    await expect(
+      handlers.get("session_start")?.({} as never, ctx as never),
+    ).resolves.toBeUndefined();
+
+    // Registration stays available so tool calls can surface the config error;
+    // a failed lifecycle start must not leave the previous status visible.
+    expect(registeredTools).toHaveLength(6);
+    expect(setStatus).toHaveBeenLastCalledWith("watcher-status", undefined);
+  });
+
+  it("deactivates registered watcher tools when the contract disappears", async () => {
+    const { ctx, handlers, activeTools, setStatus } = createRegistrationHarness();
+
+    await handlers.get("session_start")?.({} as never, ctx as never);
+    expect([...activeTools]).toContain("watcher_status");
+
+    queryStatus.mockClear();
+    readConfigPresence.mockResolvedValue({ watchYaml: false, watchYml: false });
+    await handlers.get("session_start")?.({} as never, ctx as never);
+
+    // Pi cannot unregister dynamic tools (getAllTools keeps them); the active
+    // set is what shrinks back to the non-watcher surface.
+    expect([...activeTools]).toEqual(["read", "bash", "edit", "write"]);
+    expect(queryStatus).not.toHaveBeenCalled();
+    expect(setStatus).toHaveBeenLastCalledWith("watcher-status", undefined);
+  });
+
+  it("registers watcher-prefixed slash commands without session_start", () => {
     const commands: string[] = [];
     const pi = {
       on: vi.fn(),

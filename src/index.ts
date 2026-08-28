@@ -25,7 +25,7 @@ import { classifyObservationError } from "./infra/observe.js";
 import { createCancelPort } from "./infra/cancel.js";
 import { claimFailureDelivery } from "./infra/delivery.js";
 import { createAtomicVerifyPort, createLegacyVerifyPort } from "./infra/verify.js";
-import { readConfig } from "./infra/config.js";
+import { readConfig, readConfigPresence } from "./infra/config.js";
 import { worktreeFingerprint } from "./infra/fingerprint.js";
 import {
   clearPinnedResponder,
@@ -35,8 +35,9 @@ import {
 } from "./infra/ownership.js";
 import { connectSession, disconnectSession, isSessionDisconnected } from "./infra/membership.js";
 import { createPollingLifecycle } from "./polling.js";
-import { registerTools } from "./tools.js";
+import { registerTools, type ToolDeps } from "./tools.js";
 import { registerCommands } from "./commands.js";
+import { createWatcherRegistration } from "./registration.js";
 import { createRequireTrustedConfig } from "./trusted-config.js";
 
 export default function funzzyStatus(pi: ExtensionAPI) {
@@ -101,13 +102,20 @@ export default function funzzyStatus(pi: ExtensionAPI) {
     formatStatus,
   });
 
-  pi.on("session_start", (event, ctx) => lifecycle.sessionStart(event, ctx));
+  const registration = createWatcherRegistration(pi, {
+    readConfigPresence,
+    registerWatcherTools: () => registerTools(pi, toolDeps),
+    startWatcherSession: (event, ctx) => lifecycle.sessionStart(event, ctx),
+    resetWatcherSession: (ctx) => lifecycle.reset(ctx),
+  });
+
+  pi.on("session_start", (event, ctx) => registration.sessionStart(event, ctx));
   pi.on("tool_call", (event, ctx) => lifecycle.toolCall(event, ctx));
   pi.on("tool_result", (event, ctx) => lifecycle.toolResult(event, ctx));
   pi.on("agent_settled", () => lifecycle.agentSettled());
   pi.on("session_shutdown", (_event, ctx) => lifecycle.sessionShutdown(ctx));
 
-  registerTools(pi, {
+  const toolDeps: ToolDeps = {
     requireTrustedConfig,
     queryStatus,
     waitForRun,
@@ -172,7 +180,7 @@ export default function funzzyStatus(pi: ExtensionAPI) {
         },
       );
     },
-  });
+  };
 
   registerCommands(pi, {
     requireTrustedConfig,

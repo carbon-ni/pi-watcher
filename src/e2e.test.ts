@@ -459,14 +459,23 @@ type RegisteredTool = {
 function createPi() {
   const tools: RegisteredTool[] = [];
   const commands: unknown[] = [];
+  const activeTools = new Set<string>();
   const handlers = new Map<string, (event: unknown, ctx: unknown) => unknown>();
   const sendMessage = vi.fn();
   const pi = {
     on: vi.fn((name: string, handler: (event: unknown, ctx: unknown) => unknown) => {
       handlers.set(name, handler);
     }),
-    registerTool: vi.fn((tool: RegisteredTool) => tools.push(tool)),
+    registerTool: vi.fn((tool: RegisteredTool) => {
+      tools.push(tool);
+      activeTools.add(tool.name);
+    }),
     registerCommand: vi.fn((command: unknown) => commands.push(command)),
+    getActiveTools: () => [...activeTools],
+    setActiveTools: (names: string[]) => {
+      activeTools.clear();
+      for (const name of names) activeTools.add(name);
+    },
     exec: vi.fn(
       async (command: string, args: string[], options: { cwd: string; timeout: number }) => {
         try {
@@ -703,6 +712,7 @@ describe("agent watcher feedback loop (end to end)", () => {
   it("chooses a negotiated target estimate, while an explicit timeout still wins", async () => {
     const h = await createHarness();
     try {
+      await h.sessionStart();
       h.server.setTargets([
         {
           name: "lint",
@@ -1008,7 +1018,9 @@ describe("agent watcher feedback loop (end to end)", () => {
     it("capability downgrade falls back to legacy polling with polled freshness", async () => {
       const h = await createHarness();
       try {
+        // Downgrade before session_start so the cached capability profile is legacy.
         h.server.downgradeToLegacy();
+        await h.sessionStart();
         h.server.setStatus({
           generation: 3,
           state: "passed",
@@ -1032,6 +1044,7 @@ describe("agent watcher feedback loop (end to end)", () => {
       const h = await createHarness();
       try {
         h.server.setFeatures({ sequentialOverride: false });
+        await h.sessionStart();
 
         await expect(
           runTool(h.tool("watcher_verify"), { target: "lint", sequential: true }, h.ctx),
@@ -1045,6 +1058,7 @@ describe("agent watcher feedback loop (end to end)", () => {
     it("timeout is reported as an explicit outcome, never a stale truth", async () => {
       const h = await createHarness();
       try {
+        await h.sessionStart();
         h.server.hangNext("subscribe");
         const result = await runTool(
           h.tool("watcher_observe"),
@@ -1073,6 +1087,7 @@ describe("agent watcher feedback loop (end to end)", () => {
     it("malformed server payload becomes an unknown outcome with an actionable message", async () => {
       const h = await createHarness();
       try {
+        await h.sessionStart();
         h.server.malformedNext("subscribe");
         const result = await runTool(h.tool("watcher_observe"), { wait: false }, h.ctx);
         expect(result.details).toMatchObject({ outcome: "unknown" });
@@ -1085,6 +1100,7 @@ describe("agent watcher feedback loop (end to end)", () => {
     it("reports no retained output as an actionable error", async () => {
       const h = await createHarness();
       try {
+        await h.sessionStart();
         await expect(runTool(h.tool("watcher_output"), { generation: 4 }, h.ctx)).rejects.toThrow(
           /no retained output/,
         );
@@ -1141,6 +1157,7 @@ describe("agent watcher feedback loop (end to end)", () => {
   it("tool contracts are deterministic snapshots", async () => {
     const h = await createHarness();
     try {
+      await h.sessionStart();
       expect(h.tools.map((tool) => tool.name)).toEqual([
         "watcher_status",
         "watcher_targets",

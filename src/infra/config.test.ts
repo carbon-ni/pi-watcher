@@ -3,7 +3,55 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "vitest";
-import { readConfig } from "./config.js";
+import { readConfig, readConfigPresence } from "./config.js";
+import type { WatcherConfigPresence } from "../domain/watcher-gate.js";
+
+async function withTempDir(run: (cwd: string) => Promise<void>): Promise<void> {
+  const cwd = await mkdtemp(join(tmpdir(), "funzzy-config-"));
+  try {
+    await run(cwd);
+  } finally {
+    await rm(cwd, { recursive: true, force: true });
+  }
+}
+
+test("reports no contract files when the project has none", async () => {
+  await withTempDir(async (cwd) => {
+    assert.deepEqual(await readConfigPresence(cwd), {
+      watchYaml: false,
+      watchYml: false,
+    } satisfies WatcherConfigPresence);
+  });
+});
+
+test("detects .watch.yaml presence", async () => {
+  await withTempDir(async (cwd) => {
+    await writeFile(join(cwd, ".watch.yaml"), "on:\n  socket: run.sock\n");
+    assert.deepEqual(await readConfigPresence(cwd), { watchYaml: true, watchYml: false });
+  });
+});
+
+test("detects .watch.yml presence", async () => {
+  await withTempDir(async (cwd) => {
+    await writeFile(join(cwd, ".watch.yml"), "on:\n  socket: run.sock\n");
+    assert.deepEqual(await readConfigPresence(cwd), { watchYaml: false, watchYml: true });
+  });
+});
+
+test("detects both contract files", async () => {
+  await withTempDir(async (cwd) => {
+    await writeFile(join(cwd, ".watch.yaml"), "on:\n  socket: run.sock\n");
+    await writeFile(join(cwd, ".watch.yml"), "on:\n  socket: run.sock\n");
+    assert.deepEqual(await readConfigPresence(cwd), { watchYaml: true, watchYml: true });
+  });
+});
+
+test("reports presence for malformed contract content without parsing it", async () => {
+  await withTempDir(async (cwd) => {
+    await writeFile(join(cwd, ".watch.yaml"), "::: not yaml ][");
+    assert.deepEqual(await readConfigPresence(cwd), { watchYaml: true, watchYml: false });
+  });
+});
 
 test("returns null when project has no Funzzy configuration", async () => {
   const cwd = await mkdtemp(join(tmpdir(), "funzzy-config-"));

@@ -39,16 +39,24 @@ function createPi() {
     name: string;
     execute: (...args: unknown[]) => Promise<unknown>;
   }> = [];
+  const activeTools = new Set<string>();
   const handlers = new Map<string, (event: unknown, ctx: unknown) => unknown>();
   const pi = {
     on: vi.fn((name: string, handler: (event: unknown, ctx: unknown) => unknown) => {
       handlers.set(name, handler);
     }),
     registerTool: vi.fn(
-      (tool: { name: string; execute: (...args: unknown[]) => Promise<unknown> }) =>
-        tools.push(tool),
+      (tool: { name: string; execute: (...args: unknown[]) => Promise<unknown> }) => {
+        tools.push(tool);
+        activeTools.add(tool.name);
+      },
     ),
     registerCommand: vi.fn(() => undefined),
+    getActiveTools: () => [...activeTools],
+    setActiveTools: (names: string[]) => {
+      activeTools.clear();
+      for (const name of names) activeTools.add(name);
+    },
     exec: vi.fn(
       async (command: string, args: string[], options: { cwd: string; timeout: number }) => {
         try {
@@ -143,9 +151,11 @@ describe.skipIf(!hasFzz)("real funzzy binary one-hop evidence (TASK-0084)", () =
     try {
       await waitForSocket(socketPath);
 
-      const { pi, tools } = createPi();
+      const { pi, tools, handlers } = createPi();
       funzzyStatus(pi as never);
       const ctx = createCtx(dir);
+      // Real Pi fires session_start before any tool is callable (lazy gate).
+      await handlers.get("session_start")!(undefined, ctx);
 
       // One-hop loop (real agent path): verify the failing target — it fails
       // and the tool reports the failure — then read the exact generation from

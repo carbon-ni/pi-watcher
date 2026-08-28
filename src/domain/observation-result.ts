@@ -54,6 +54,8 @@ export interface WatcherObservationResult {
   outcome: ObservationOutcome;
   instance: WatcherInstance | null;
   generation: number | null;
+  /** Fresh-generation selector, when this result intentionally excludes a baseline. */
+  afterGeneration: number | null;
   batchId: string | null;
   state: WatcherExecutionState | null;
   durationMs: number | null;
@@ -86,6 +88,7 @@ export interface WatcherObservationResult {
 
 export interface ObservationResultOptions {
   waitedMs?: number;
+  afterGeneration?: number | null;
   supersedingGeneration?: number | null;
   message?: string | null;
   maxEvidenceLines?: number;
@@ -114,8 +117,16 @@ export function observationResult(
   const failedTasks = (observation?.snapshot?.tasks ?? []).filter(
     (task) => task.state === "failed",
   );
-  const nextAction =
-    truncated && state === "failed" && generation !== null
+  const afterGeneration = options.afterGeneration ?? null;
+  const excludedBaseline =
+    outcome === "timeout" &&
+    afterGeneration !== null &&
+    (generation === null || generation <= afterGeneration);
+  const nextAction = excludedBaseline
+    ? generation === null || state === null || state === "idle"
+      ? `trigger a matching change before watcher_observe wait=true afterGeneration=${afterGeneration}`
+      : `watcher_observe wait=true generation=${generation}`
+    : truncated && state === "failed" && generation !== null
       ? `watcher_output generation=${generation}${
           failedTasks.length === 1 ? ` task=${failedTasks[0]!.name}` : ""
         }`
@@ -125,6 +136,7 @@ export function observationResult(
     outcome,
     instance: observation?.snapshot?.instance ?? null,
     generation,
+    afterGeneration,
     batchId: observation?.snapshot?.batchId ?? null,
     state,
     durationMs: observation?.status.durationMs ?? null,
@@ -159,8 +171,19 @@ export function formatObservation(result: WatcherObservationResult): string {
       return `NOOP${generation}${freshness} (nothing pending)${polled}`;
     case "superseded":
       return `SUPERSEDED${generation}${freshness} supersededBy=${result.supersedingGeneration}${polled}`;
-    case "timeout":
+    case "timeout": {
+      if (result.afterGeneration !== null) {
+        const current = result.generation === null ? "none" : result.generation;
+        const state = result.state ?? "unknown";
+        const excluded = result.generation === null || result.generation <= result.afterGeneration;
+        if (excluded) {
+          const next = result.nextAction === null ? "" : `\nnext: ${result.nextAction}`;
+          return `TIMEOUT gen>${result.afterGeneration} current=${current} state=${state} excluded=true${freshness}${waited}${polled}${next}`;
+        }
+        return `TIMEOUT${generation} selectedAfter=${result.afterGeneration}${freshness}${waited}${polled}`;
+      }
       return `TIMEOUT${generation}${freshness}${waited}${polled}`;
+    }
     case "disconnect":
       return `DISCONNECTED${generation}${freshness}${polled}`;
     case "aborted":
@@ -213,10 +236,6 @@ function formatStateLine(
   return `${label}${generation}${freshness}${duration}${concurrency}${polled}${timings}`;
 }
 
-function isTerminalState(state: WatcherExecutionState): boolean {
-  return state === "passed" || state === "failed" || state === "cancelled";
-}
-
 const STATE_LABELS: Record<WatcherExecutionState | "unknown", string> = {
   idle: "IDLE",
   running: "RUNNING",
@@ -239,12 +258,10 @@ export function formatObservationProgress(
     return `${label}${generation} waitingForGeneration=${selector.generation}${freshness}${polled}`;
   }
   if (selector.afterGeneration !== null && selector.afterGeneration !== undefined) {
-    const waitingLabel =
-      observation.status.generation <= selector.afterGeneration &&
-      isTerminalState(observation.status.state)
-        ? "WAITING"
-        : label;
-    return `${waitingLabel}${generation} waitingForGeneration>${selector.afterGeneration}${freshness}${polled}`;
+    if (observation.status.generation <= selector.afterGeneration) {
+      return `WAITING gen>${selector.afterGeneration} current=${observation.status.generation} state=${observation.status.state} excluded=true${freshness}${polled}`;
+    }
+    return `${label}${generation} selectedAfter=${selector.afterGeneration}${freshness}${polled}`;
   }
   return `${label}${generation}${freshness}${polled}`;
 }

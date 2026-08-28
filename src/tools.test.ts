@@ -62,6 +62,7 @@ const OBSERVE_RESULT: WatcherObservationResult = {
   outcome: "terminal",
   instance: null,
   generation: 5,
+  afterGeneration: null,
   batchId: null,
   state: "passed",
   durationMs: 42,
@@ -487,6 +488,34 @@ describe("watcher_observe", () => {
     expect(texts[0]!).toMatch(/^RUNNING gen=5 freshness=current/);
     expect(texts[0]!).toMatch(/waited=\d+s$/);
     expect(texts[2]!).toMatch(/^PASS gen=5 freshness=current/);
+  });
+
+  it("explains excluded baselines and selected newer generations in progress", async () => {
+    const { pi, tools } = createPi();
+    const requestObservation = vi.fn(
+      async (_request: unknown, deps: { onObservation?: (o: WatcherObservation) => void }) => {
+        deps.onObservation?.({
+          ...OBS_PASSED,
+          status: { ...OBS_PASSED.status, generation: 4, state: "failed" },
+        });
+        deps.onObservation?.(OBS_RUNNING);
+        return OBSERVE_RESULT;
+      },
+    );
+    registerTools(pi as never, createDeps({ requestObservation }));
+    const tool = registeredTool(tools, "watcher_observe")!;
+    const onUpdate =
+      vi.fn<
+        (update: { content: Array<{ type: string; text: string }>; details: unknown }) => void
+      >();
+
+    await tool.execute("1", { wait: true, afterGeneration: 4 }, undefined, onUpdate, trustedCtx());
+
+    const texts = onUpdate.mock.calls.map((call) => call[0].content[0]!.text);
+    expect(texts[0]).toMatch(
+      /^WAITING gen>4 current=4 state=failed excluded=true freshness=current waited=\d+s$/,
+    );
+    expect(texts[1]).toMatch(/^RUNNING gen=5 selectedAfter=4 freshness=current waited=\d+s$/);
   });
 
   it("does not emit progress for a snapshot-only call", async () => {

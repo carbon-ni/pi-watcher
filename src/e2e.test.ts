@@ -509,8 +509,9 @@ async function runTool(
   tool: RegisteredTool | undefined,
   params: Record<string, unknown>,
   ctx: unknown,
+  onUpdate?: (update: { content: Array<{ type: string; text: string }> }) => void,
 ): Promise<ToolResult> {
-  return (await tool!.execute("1", params, undefined, undefined, ctx)) as ToolResult;
+  return (await tool!.execute("1", params, undefined, onUpdate, ctx)) as ToolResult;
 }
 
 async function runToolSignal(
@@ -625,6 +626,46 @@ afterEach(() => {
 });
 
 describe("agent watcher feedback loop (end to end)", () => {
+  it("fresh observation progress distinguishes excluded baseline from selected generation", async () => {
+    const h = await createHarness();
+    try {
+      h.server.setStatus({
+        generation: 5,
+        state: "failed",
+        trigger: "src/main.ts",
+        commands: ["make all"],
+        durationMs: 42,
+        failures: ["baseline failed"],
+      });
+      await h.sessionStart();
+
+      h.server.setNextRun({ trigger: "src/main.ts", commands: ["make all"] });
+      const updates: Array<{ content: Array<{ type: string; text: string }> }> = [];
+      const freshPromise = runTool(
+        h.tool("watcher_observe"),
+        { wait: true, afterGeneration: 5 },
+        h.ctx,
+        (update) => updates.push(update),
+      );
+      await h.waitForNextSubscribe();
+      h.server.startRun();
+      h.server.completeRun({ outcome: "passed", durationMs: 12 });
+      const fresh = await freshPromise;
+
+      expect(updates[0]!.content[0]!.text).toMatch(
+        /^WAITING gen>5 current=5 state=failed excluded=true freshness=current waited=\d+s$/,
+      );
+      expect(
+        updates.some((update) => update.content[0]!.text.startsWith("PASS gen=6 selectedAfter=5")),
+      ).toBe(true);
+      expect(fresh.content[0]!.text).toBe(
+        "PASS gen=6 freshness=current duration=12ms concurrency=2/2 source=config",
+      );
+    } finally {
+      await h.cleanup();
+    }
+  });
+
   it("green loop: observe baseline, edit, await exact fresh generation, accept unchanged-fingerprint verification", async () => {
     const h = await createHarness();
     try {

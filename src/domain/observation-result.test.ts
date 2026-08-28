@@ -358,17 +358,44 @@ describe("formatObservationProgress", () => {
     );
   });
 
-  it.each(["passed", "failed"] as const)(
-    "labels excluded fresh-anchor %s progress as waiting",
+  it.each(["passed", "failed", "cancelled", "running", "idle"] as const)(
+    "labels excluded fresh-anchor %s progress with selector context",
     (state) => {
       expect(
         formatObservationProgress(
           { ...OBSERVATION, status: { ...OBSERVATION.status, state } },
           { afterGeneration: 7 },
         ),
-      ).toBe("WAITING gen=7 waitingForGeneration>7 freshness=current");
+      ).toBe(`WAITING gen>7 current=7 state=${state} excluded=true freshness=current`);
     },
   );
+
+  it("labels an observed newer generation as selected after the selector", () => {
+    expect(formatObservationProgress(OBSERVATION, { afterGeneration: 6 })).toBe(
+      "FAIL gen=7 selectedAfter=6 freshness=current",
+    );
+  });
+
+  it("keeps selector context when a wait times out before a newer generation", () => {
+    const baseline = { ...OBSERVATION, status: { ...OBSERVATION.status, generation: 16 } };
+    expect(
+      formatObservation(
+        observationResult(baseline, "timeout", { waitedMs: 600_000, afterGeneration: 16 }),
+      ),
+    ).toBe(
+      "TIMEOUT gen>16 current=16 state=failed excluded=true freshness=current waited=600s\nnext: watcher_observe wait=true generation=16",
+    );
+  });
+
+  it("hints at a matching trigger when no generation exists for a selector wait", () => {
+    expect(
+      formatObservation(
+        observationResult(null, "timeout", { waitedMs: 600_000, afterGeneration: 7 }),
+      ),
+    ).toBe(
+      "TIMEOUT gen>7 current=none state=unknown excluded=true freshness=unknown waited=600s\nnext: trigger a matching change before watcher_observe wait=true afterGeneration=7",
+    );
+  });
 
   it("marks polled progress with the weaker-freshness suffix", () => {
     const polled: WatcherObservation = {

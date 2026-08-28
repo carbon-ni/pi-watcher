@@ -95,6 +95,9 @@ export async function requestObservation(
           deps.projectRoot ?? "",
         ).class;
 
+  const afterGeneration = request.afterGeneration ?? null;
+  const exactGeneration = request.generation ?? null;
+
   const finish = (
     outcome: ObservationOutcome,
     observation: WatcherObservation | null,
@@ -102,6 +105,7 @@ export async function requestObservation(
   ): WatcherObservationResult =>
     observationResult(observation, outcome, {
       waitedMs: now() - startedAt,
+      afterGeneration,
       maxEvidenceLines: request.maxEvidenceLines,
       correlation: correlate(observation),
       ...options,
@@ -130,8 +134,6 @@ export async function requestObservation(
   try {
     let anchor: number | null = null;
     let latched: number | null = null;
-    const afterGeneration = request.afterGeneration ?? null;
-    const exactGeneration = request.generation ?? null;
 
     for await (const observation of deps.port.open(controller.signal)) {
       if (now() >= deadline) return finish("timeout", last ?? observation);

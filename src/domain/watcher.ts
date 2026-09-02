@@ -56,7 +56,7 @@ export interface WatcherStatus {
  * Wire shape is produced by the Rust control server (`src/control.rs`):
  * `ControlState` serialized with serde camelCase.
  */
-export function decodeWatcherStatus(value: unknown, schemaVersion = 1): WatcherStatus {
+export function decodeWatcherStatus(value: unknown): WatcherStatus {
   const object = expectObject(value, "status response");
 
   const generation = readRequiredNumber(object, "generation", "status response");
@@ -65,33 +65,13 @@ export function decodeWatcherStatus(value: unknown, schemaVersion = 1): WatcherS
   const commands = readStringArray(object, "commands", "status response");
   const durationMs = readNullableNumber(object, "durationMs", "status response");
   const failures = readStringArray(object, "failures", "status response");
-  const negotiatedSchema = readOptionalSchemaVersion(object) ?? schemaVersion;
-  const services = readServices(object, negotiatedSchema >= 2, "status response");
-  const normalizedServices = negotiatedSchema >= 2 || "services" in object ? { services } : {};
+  const services = readServices(object, "status response");
 
-  return { generation, state, trigger, commands, durationMs, failures, ...normalizedServices };
+  return { generation, state, trigger, commands, durationMs, failures, services };
 }
 
-function readOptionalSchemaVersion(object: Record<string, unknown>): number | null {
-  if (!("schemaVersion" in object)) return null;
-  const value = object["schemaVersion"];
-  if (typeof value !== "number" || !Number.isSafeInteger(value)) {
-    throw new WatcherProtocolError(
-      `Funzzy status response: "schemaVersion" must be a number, got ${describeValue(value)}`,
-    );
-  }
-  return value;
-}
-
-function readServices(
-  object: Record<string, unknown>,
-  required: boolean,
-  what: string,
-): WatcherManagedService[] {
-  if (!("services" in object)) {
-    if (required) throw new WatcherProtocolError(`Funzzy ${what}: "services" is required`);
-    return [];
-  }
+function readServices(object: Record<string, unknown>, what: string): WatcherManagedService[] {
+  if (!("services" in object)) return [];
   const value = object["services"];
   if (!Array.isArray(value)) {
     throw new WatcherProtocolError(

@@ -200,10 +200,7 @@ export function decodeWatcherCapabilities(value: unknown): WatcherCapabilityProf
  * generation, terminal or transitional state, per-task outcomes, pending work,
  * and the freshness tier.
  */
-export function decodeWatcherCorrelatedSnapshot(
-  value: unknown,
-  schemaVersion = 1,
-): WatcherCorrelatedSnapshot {
+export function decodeWatcherCorrelatedSnapshot(value: unknown): WatcherCorrelatedSnapshot {
   const object = expectObject(value, "correlated snapshot");
 
   const instance = readWatcherInstance(object, "correlated snapshot");
@@ -224,7 +221,7 @@ export function decodeWatcherCorrelatedSnapshot(
   const effectiveConcurrency = readOptionalNullableNumber(object, "effectiveConcurrency") ?? 1;
   const concurrencySource = readOptionalNullableString(object, "concurrencySource") ?? "config";
   const estimate = readOptionalDurationEstimate(object, "correlated snapshot");
-  const services = readManagedServices(object, schemaVersion >= 2, "correlated snapshot");
+  const services = readManagedServices(object, "correlated snapshot");
 
   return {
     instance,
@@ -270,13 +267,9 @@ export function snapshotToStatus(snapshot: WatcherCorrelatedSnapshot): WatcherSt
 
 function readManagedServices(
   object: Record<string, unknown>,
-  required: boolean,
   what: string,
 ): WatcherManagedService[] {
-  if (!("services" in object)) {
-    if (required) throw new WatcherProtocolError(`Funzzy ${what}: "services" is required`);
-    return [];
-  }
+  if (!("services" in object)) return [];
   const raw = object["services"];
   if (!Array.isArray(raw)) {
     throw new WatcherProtocolError(

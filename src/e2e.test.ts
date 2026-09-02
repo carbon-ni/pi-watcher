@@ -327,7 +327,6 @@ class FakeWatcherServer {
           commands: this.commands,
           durationMs: this.durationMs,
           failures: this.failures,
-          services: [],
         });
         break;
       case "targets":
@@ -412,7 +411,6 @@ class FakeWatcherServer {
       trigger: this.trigger,
       commands: this.commands,
       tasks: [],
-      services: [],
       pending: 0,
       durationMs: this.durationMs,
       failures: this.failures,

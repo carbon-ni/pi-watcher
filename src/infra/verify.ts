@@ -24,7 +24,6 @@ import type { AtomicRunOutcome, AtomicRunRequest, VerifyPort } from "../applicat
 export function createAtomicVerifyPort(
   socketPath: string,
   expectedInstanceToken: string | null,
-  schemaVersion = 1,
 ): VerifyPort {
   return {
     async runAndAwait(request: AtomicRunRequest): Promise<AtomicRunOutcome> {
@@ -36,7 +35,6 @@ export function createAtomicVerifyPort(
           (runId) => request.onSchedule?.(runId),
           request.signal,
           request.sequential,
-          schemaVersion,
         );
         if (request.signal?.aborted) return { kind: "aborted" };
         if (

@@ -49,17 +49,6 @@ describe("decodeWatcherStatus", () => {
     }
   });
 
-  it("requires managed services for schema two status", () => {
-    expect(() => decodeWatcherStatus({ ...rustStatusPayload, services: undefined }, 2)).toThrow(
-      /"services" must be an array/,
-    );
-    const schemaTwoWithoutServices: Record<string, unknown> = { ...rustStatusPayload };
-    delete schemaTwoWithoutServices.services;
-    expect(() => decodeWatcherStatus(schemaTwoWithoutServices, 2)).toThrow(
-      /"services" is required/,
-    );
-  });
-
   it("rejects non-object payloads with an actionable error", () => {
     expect(() => decodeWatcherStatus("not an object")).toThrow(WatcherProtocolError);
     expect(() => decodeWatcherStatus(null)).toThrow(/status response must be a JSON object/);

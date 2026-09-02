@@ -110,7 +110,6 @@ export async function requestRunAtomic(
   onSchedule?: (runId: number) => void,
   signal?: AbortSignal,
   sequential = false,
-  schemaVersion = 1,
 ): Promise<AtomicRunResult> {
   const deadline = Date.now() + timeoutMs;
   let lastConnectionError: Error | undefined;
@@ -126,7 +125,6 @@ export async function requestRunAtomic(
         onSchedule,
         signal,
         sequential,
-        schemaVersion,
       );
       if (retries > 0) debugLog(`connected to ${socketPath} after ${retries} retries`);
       return result;
@@ -151,7 +149,6 @@ function runAtomicOnce(
   onSchedule: ((runId: number) => void) | undefined,
   signal: AbortSignal | undefined,
   sequential: boolean,
-  schemaVersion: number,
 ): Promise<AtomicRunResult> {
   return new Promise((resolve, reject) => {
     const socket = createConnection(socketPath);
@@ -190,7 +187,7 @@ function runAtomicOnce(
           return;
         }
         if (parsed.method === "runComplete" && parsed.params !== undefined) {
-          const result = decodeAtomicRunResult(parsed.params, schemaVersion);
+          const result = decodeAtomicRunResult(parsed.params);
           settled = true;
           cleanup();
           socket.end();
@@ -323,17 +320,13 @@ export async function requestOutput(
   }
 }
 
-export function queryStatus(
-  socketPath: string,
-  timeoutMs = 1_000,
-  schemaVersion = 1,
-): Promise<FunzzyStatus> {
+export function queryStatus(socketPath: string, timeoutMs = 1_000): Promise<FunzzyStatus> {
   return sendRequest(
     socketPath,
     { jsonrpc: "2.0", id: "status", method: "status" },
     timeoutMs,
     true,
-    (value) => decodeWatcherStatus(value, schemaVersion),
+    decodeWatcherStatus,
   );
 }
 
@@ -515,15 +508,10 @@ export function formatStatus(status: FunzzyStatus): string {
   const generation = `gen=${status.generation}`;
   const tests = status.commands.length > 0 ? ` tests=${status.commands.join(" && ")}` : "";
   const trigger = status.trigger ? ` trigger=${status.trigger}` : "";
-  const services = (status.services ?? [])
-    .map((service) => `${service.name}: ${service.state}`)
-    .join("\n");
-  const withServices = (summary: string): string =>
-    services ? `${summary}\n${services}` : summary;
 
   if (status.state === "passed") {
     const duration = status.durationMs === null ? "" : ` duration=${status.durationMs}ms`;
-    return withServices(`PASS ${generation}${tests}${duration}${trigger}`);
+    return `PASS ${generation}${tests}${duration}${trigger}`;
   }
 
   if (status.state === "failed") {
@@ -532,10 +520,10 @@ export function formatStatus(status: FunzzyStatus): string {
       .map((failure) => `- ${failure}`)
       .join("\n");
     const summary = `FAIL ${generation} failures=${status.failures.length}${tests}${trigger}`;
-    return withServices(failures ? `${summary}\n${failures}` : summary);
+    return failures ? `${summary}\n${failures}` : summary;
   }
 
-  return withServices(`${status.state.toUpperCase()} ${generation}${tests}${trigger}`);
+  return `${status.state.toUpperCase()} ${generation}${tests}${trigger}`;
 }
 
 function debugLog(message: string): void {

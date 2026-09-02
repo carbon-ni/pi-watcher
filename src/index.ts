@@ -140,7 +140,7 @@ export default function funzzyStatus(pi: ExtensionAPI) {
       }
       const port =
         profile.features.atomicAwait && profile.features.correlatedSnapshots
-          ? createAtomicVerifyPort(config.socketPath, profile.instance.token, profile.schemaVersion)
+          ? createAtomicVerifyPort(config.socketPath, profile.instance.token)
           : createLegacyVerifyPort({
               socketPath: config.socketPath,
               pollIntervalMs: Math.min(config.pollIntervalMs, 250),
@@ -153,7 +153,7 @@ export default function funzzyStatus(pi: ExtensionAPI) {
     createObservePort: async (config) => {
       const profile = await loadCapabilities(config.socketPath, capabilityCache);
       return profile.features.subscription && profile.features.correlatedSnapshots
-        ? createSubscriptionPort(config.socketPath, profile.schemaVersion)
+        ? createSubscriptionPort(config.socketPath)
         : createPollingPort(queryStatus, config.socketPath, Math.min(config.pollIntervalMs, 250));
     },
     classifyObservationError,

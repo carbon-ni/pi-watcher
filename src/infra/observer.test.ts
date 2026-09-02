@@ -17,7 +17,6 @@ const STATUS: WatcherStatus = {
   commands: ["cargo test"],
   durationMs: 42,
   failures: [],
-  services: [],
 };
 
 const SNAPSHOT = {

@@ -143,23 +143,16 @@ describe("decodeWatcherCorrelatedSnapshot", () => {
     freshness: "current",
   };
 
-  it("requires services for negotiated schema two snapshots", () => {
-    expect(() => decodeWatcherCorrelatedSnapshot(minimum, 2)).toThrow(/"services" is required/);
-  });
-
   it("decodes managed service telemetry with strict vocabulary", () => {
-    const snapshot = decodeWatcherCorrelatedSnapshot(
-      {
-        ...minimum,
-        services: [
-          {
-            name: "api",
-            state: "ready",
-          },
-        ],
-      },
-      2,
-    );
+    const snapshot = decodeWatcherCorrelatedSnapshot({
+      ...minimum,
+      services: [
+        {
+          name: "api",
+          state: "ready",
+        },
+      ],
+    });
     expect(snapshot.services?.[0]).toMatchObject({ name: "api", state: "ready" });
   });
 

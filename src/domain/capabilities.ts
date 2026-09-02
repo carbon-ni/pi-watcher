@@ -4,7 +4,6 @@ import {
   expectObject,
   readExecutionState,
   readNullableNumber,
-  readNullableString,
   readRequiredNumber,
   readRequiredString,
   readStringArray,
@@ -71,8 +70,6 @@ export interface WatcherFeatures {
   durationEstimates: boolean;
   /** Exact-generation sequential override (TASK-0073); false when absent. */
   sequentialOverride: boolean;
-  /** Optional for source-level callers constructing legacy profiles. */
-  managedServices?: boolean;
 }
 
 export type WatcherCapabilitySource = "negotiated" | "legacy";
@@ -120,7 +117,7 @@ export interface WatcherCorrelatedSnapshot {
   /** Changed paths of the batch (optional; empty when unreported). */
   paths: string[];
   /** Live managed services, independent from generation outcome. */
-  /** Normalized to [] by decoders; optional for source-level legacy callers. */
+  /** Live managed services, independent from generation outcome. */
   services?: WatcherManagedService[];
   /** Configured scheduler concurrency of this watcher (TASK-0073). */
   configuredConcurrency: number;
@@ -161,7 +158,6 @@ export const LEGACY_CAPABILITY_PROFILE: WatcherCapabilityProfile = {
     pendingWork: false,
     durationEstimates: false,
     sequentialOverride: false,
-    managedServices: false,
   },
 };
 
@@ -300,17 +296,7 @@ function readManagedServices(
     }
     return {
       name: readRequiredString(service, "name", what),
-      instanceId: readRequiredNumber(service, "instanceId", what),
       state: state as WatcherServiceState,
-      originGeneration: readNullableNumber(service, "originGeneration", what),
-      revision: readRequiredNumber(service, "revision", what),
-      signature: readRequiredString(service, "signature", what),
-      restartAttemptsUsed: readRequiredNumber(service, "restartAttemptsUsed", what),
-      restartAttemptsRemaining: readRequiredNumber(service, "restartAttemptsRemaining", what),
-      startedAtEpochMs: readNullableNumber(service, "startedAtEpochMs", what),
-      readyAtEpochMs: readNullableNumber(service, "readyAtEpochMs", what),
-      uptimeMs: readNullableNumber(service, "uptimeMs", what),
-      latestError: readNullableString(service, "latestError", what),
     };
   });
 }
@@ -427,7 +413,6 @@ function readWatcherFeatures(object: Record<string, unknown>): WatcherFeatures {
     durationEstimates: readOptionalFeatureFlag(features, "features.durationEstimates"),
     // Additive (TASK-0073): absent on legacy servers, never assumed.
     sequentialOverride: readOptionalFeatureFlag(features, "features.sequentialOverride"),
-    managedServices: readOptionalFeatureFlag(features, "features.managedServices"),
   };
 }
 

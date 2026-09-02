@@ -44,7 +44,6 @@ describe("decodeWatcherCapabilities", () => {
         pendingWork: false,
         durationEstimates: false,
         sequentialOverride: false,
-        managedServices: false,
       },
     });
   });
@@ -55,7 +54,7 @@ describe("decodeWatcherCapabilities", () => {
     expect(profile.instance.token).toBe("fz-7f3a");
     expect(profile.instance.startedAtEpochMs).toBe(1710000000000);
     expect(profile.methods).toContain("subscribe");
-    expect(profile.optionalFields).toEqual(["batchId", "pending", "tasks", "paths", "services"]);
+    expect(profile.optionalFields).toEqual(["batchId", "pending", "tasks", "paths"]);
     expect(profile.limits.outputRetentionBytes).toBe(1048576);
     expect(profile.limits.outputSchemaVersion).toBe(2);
     expect(profile.limits.outputModes).toEqual(["tail", "page"]);
@@ -68,7 +67,6 @@ describe("decodeWatcherCapabilities", () => {
       pendingWork: true,
       durationEstimates: true,
       sequentialOverride: true,
-      managedServices: true,
     });
   });
 
@@ -156,17 +154,7 @@ describe("decodeWatcherCorrelatedSnapshot", () => {
         services: [
           {
             name: "api",
-            instanceId: 7,
             state: "ready",
-            originGeneration: 4,
-            revision: 3,
-            signature: "api-v3",
-            restartAttemptsUsed: 0,
-            restartAttemptsRemaining: 3,
-            startedAtEpochMs: 90,
-            readyAtEpochMs: 100,
-            uptimeMs: 10,
-            latestError: null,
           },
         ],
       },

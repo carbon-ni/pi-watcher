@@ -40,7 +40,6 @@ type CapabilityFeatures = {
   pendingWork: boolean;
   durationEstimates: boolean;
   sequentialOverride: boolean;
-  managedServices: boolean;
 };
 
 let serverCounter = 0;
@@ -70,7 +69,6 @@ class FakeWatcherServer {
     pendingWork: true,
     durationEstimates: true,
     sequentialOverride: true,
-    managedServices: true,
   };
   private legacyCapabilities = false;
   private subscribers = new Set<Socket>();

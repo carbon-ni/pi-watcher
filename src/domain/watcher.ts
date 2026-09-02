@@ -29,17 +29,7 @@ export type WatcherServiceState = (typeof WATCHER_SERVICE_STATES)[number];
 
 export interface WatcherManagedService {
   name: string;
-  instanceId: number;
   state: WatcherServiceState;
-  originGeneration: number | null;
-  revision: number;
-  signature: string;
-  restartAttemptsUsed: number;
-  restartAttemptsRemaining: number;
-  startedAtEpochMs: number | null;
-  readyAtEpochMs: number | null;
-  uptimeMs: number | null;
-  latestError: string | null;
 }
 
 export interface WatcherTarget {
@@ -121,17 +111,7 @@ function readServices(
     }
     return {
       name: readRequiredString(service, "name", what),
-      instanceId: readRequiredNumber(service, "instanceId", what),
       state: state as WatcherServiceState,
-      originGeneration: readNullableNumber(service, "originGeneration", what),
-      revision: readRequiredNumber(service, "revision", what),
-      signature: readRequiredString(service, "signature", what),
-      restartAttemptsUsed: readRequiredNumber(service, "restartAttemptsUsed", what),
-      restartAttemptsRemaining: readRequiredNumber(service, "restartAttemptsRemaining", what),
-      startedAtEpochMs: readNullableNumber(service, "startedAtEpochMs", what),
-      readyAtEpochMs: readNullableNumber(service, "readyAtEpochMs", what),
-      uptimeMs: readNullableNumber(service, "uptimeMs", what),
-      latestError: readNullableString(service, "latestError", what),
     };
   });
 }

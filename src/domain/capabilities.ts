@@ -117,7 +117,6 @@ export interface WatcherCorrelatedSnapshot {
   /** Changed paths of the batch (optional; empty when unreported). */
   paths: string[];
   /** Live managed services, independent from generation outcome. */
-  /** Live managed services, independent from generation outcome. */
   services?: WatcherManagedService[];
   /** Configured scheduler concurrency of this watcher (TASK-0073). */
   configuredConcurrency: number;

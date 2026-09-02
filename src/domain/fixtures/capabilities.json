@@ -6,7 +6,7 @@
     "startedAtEpochMs": 1710000000000
   },
   "methods": ["status", "targets", "run", "capabilities", "subscribe", "cancel", "output"],
-  "optionalFields": ["batchId", "pending", "tasks", "paths"],
+  "optionalFields": ["batchId", "pending", "tasks", "paths", "services"],
   "limits": {
     "outputRetentionBytes": 1048576,
     "maxResponseBytes": 65536,
@@ -23,6 +23,7 @@
     "outputRetrieval": true,
     "pendingWork": true,
     "durationEstimates": true,
-    "sequentialOverride": true
+    "sequentialOverride": true,
+    "managedServices": true
   }
 }

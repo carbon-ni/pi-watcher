@@ -40,6 +40,7 @@ type CapabilityFeatures = {
   pendingWork: boolean;
   durationEstimates: boolean;
   sequentialOverride: boolean;
+  managedServices: boolean;
 };
 
 let serverCounter = 0;
@@ -69,6 +70,7 @@ class FakeWatcherServer {
     pendingWork: true,
     durationEstimates: true,
     sequentialOverride: true,
+    managedServices: true,
   };
   private legacyCapabilities = false;
   private subscribers = new Set<Socket>();
@@ -327,6 +329,7 @@ class FakeWatcherServer {
           commands: this.commands,
           durationMs: this.durationMs,
           failures: this.failures,
+          services: [],
         });
         break;
       case "targets":
@@ -411,6 +414,7 @@ class FakeWatcherServer {
       trigger: this.trigger,
       commands: this.commands,
       tasks: [],
+      services: [],
       pending: 0,
       durationMs: this.durationMs,
       failures: this.failures,

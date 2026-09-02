@@ -12,12 +12,14 @@ describe("decodeWatcherStatus", () => {
   // Wire fixture exactly as the Rust control server serializes it
   // (src/control.rs: ControlState with serde camelCase).
   const rustStatusPayload = {
+    schemaVersion: 2,
     generation: 4,
     state: "passed",
     trigger: "src/main.rs",
     commands: ["cargo test"],
     durationMs: 42,
     failures: [],
+    services: [],
   };
 
   it("decodes a Rust-produced passed status", () => {
@@ -28,6 +30,7 @@ describe("decodeWatcherStatus", () => {
       commands: ["cargo test"],
       durationMs: 42,
       failures: [],
+      services: [],
     });
   });
 
@@ -44,6 +47,17 @@ describe("decodeWatcherStatus", () => {
         }).state,
       ).toBe(state);
     }
+  });
+
+  it("requires managed services for schema two status", () => {
+    expect(() => decodeWatcherStatus({ ...rustStatusPayload, services: undefined }, 2)).toThrow(
+      /"services" must be an array/,
+    );
+    const schemaTwoWithoutServices: Record<string, unknown> = { ...rustStatusPayload };
+    delete schemaTwoWithoutServices.services;
+    expect(() => decodeWatcherStatus(schemaTwoWithoutServices, 2)).toThrow(
+      /"services" is required/,
+    );
   });
 
   it("rejects non-object payloads with an actionable error", () => {

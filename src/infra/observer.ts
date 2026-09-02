@@ -50,15 +50,16 @@ export function createPollingPort(
  * snapshot, then `snapshot` notifications stream transitions. The stream ends
  * when the server closes the connection; the observer reconnects.
  */
-export function createSubscriptionPort(socketPath: string): ObserverPort {
+export function createSubscriptionPort(socketPath: string, schemaVersion = 1): ObserverPort {
   return {
-    open: (signal) => subscribeToSnapshots(socketPath, signal),
+    open: (signal) => subscribeToSnapshots(socketPath, signal, schemaVersion),
   };
 }
 
 async function* subscribeToSnapshots(
   socketPath: string,
   signal: AbortSignal,
+  schemaVersion: number,
 ): AsyncGenerator<WatcherObservation> {
   let sequence = 0;
   const socket = createConnection(socketPath);
@@ -77,13 +78,13 @@ async function* subscribeToSnapshots(
       }
       if (message.id === "subscribe" && message.result !== undefined) {
         sequence += 1;
-        const snapshot = decodeWatcherCorrelatedSnapshot(message.result);
+        const snapshot = decodeWatcherCorrelatedSnapshot(message.result, schemaVersion);
         yield observationFromSnapshot(snapshot, sequence);
         continue;
       }
       if (message.method === "snapshot" && message.params !== undefined) {
         sequence += 1;
-        const snapshot = decodeWatcherCorrelatedSnapshot(message.params);
+        const snapshot = decodeWatcherCorrelatedSnapshot(message.params, schemaVersion);
         yield observationFromSnapshot(snapshot, sequence);
         continue;
       }

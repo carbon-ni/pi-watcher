@@ -232,12 +232,12 @@ export interface AtomicRunResult {
   snapshot: WatcherCorrelatedSnapshot;
 }
 
-export function decodeAtomicRunResult(value: unknown): AtomicRunResult {
+export function decodeAtomicRunResult(value: unknown, schemaVersion = 1): AtomicRunResult {
   const object = expectObject(value, "run response");
   const runId = readRequiredNumber(object, "runId", "run response");
   if (!("snapshot" in object)) {
     throw new WatcherProtocolError(`Funzzy run response: "snapshot" is required`);
   }
-  const snapshot = decodeWatcherCorrelatedSnapshot(object["snapshot"]);
+  const snapshot = decodeWatcherCorrelatedSnapshot(object["snapshot"], schemaVersion);
   return { runId, snapshot };
 }

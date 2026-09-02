@@ -4,6 +4,7 @@ import {
   expectObject,
   readExecutionState,
   readNullableNumber,
+  readNullableString,
   readRequiredNumber,
   readRequiredString,
   readStringArray,
@@ -12,9 +13,19 @@ import {
 } from "./protocol.js";
 
 export { WatcherProtocolError } from "./protocol.js";
-export type { WatcherExecutionState } from "./watcher.js";
+export {
+  WATCHER_SERVICE_STATES,
+  type WatcherExecutionState,
+  type WatcherManagedService,
+  type WatcherServiceState,
+} from "./watcher.js";
 
 import type { WatcherStatus } from "./watcher.js";
+import {
+  WATCHER_SERVICE_STATES,
+  type WatcherManagedService,
+  type WatcherServiceState,
+} from "./watcher.js";
 
 /**
  * Correlated snapshot vocabulary (contract §1, §3):
@@ -60,6 +71,8 @@ export interface WatcherFeatures {
   durationEstimates: boolean;
   /** Exact-generation sequential override (TASK-0073); false when absent. */
   sequentialOverride: boolean;
+  /** Optional for source-level callers constructing legacy profiles. */
+  managedServices?: boolean;
 }
 
 export type WatcherCapabilitySource = "negotiated" | "legacy";
@@ -106,6 +119,9 @@ export interface WatcherCorrelatedSnapshot {
   failures: string[];
   /** Changed paths of the batch (optional; empty when unreported). */
   paths: string[];
+  /** Live managed services, independent from generation outcome. */
+  /** Normalized to [] by decoders; optional for source-level legacy callers. */
+  services?: WatcherManagedService[];
   /** Configured scheduler concurrency of this watcher (TASK-0073). */
   configuredConcurrency: number;
   /** Effective concurrency of this generation (TASK-0073). */
@@ -145,6 +161,7 @@ export const LEGACY_CAPABILITY_PROFILE: WatcherCapabilityProfile = {
     pendingWork: false,
     durationEstimates: false,
     sequentialOverride: false,
+    managedServices: false,
   },
 };
 
@@ -187,7 +204,10 @@ export function decodeWatcherCapabilities(value: unknown): WatcherCapabilityProf
  * generation, terminal or transitional state, per-task outcomes, pending work,
  * and the freshness tier.
  */
-export function decodeWatcherCorrelatedSnapshot(value: unknown): WatcherCorrelatedSnapshot {
+export function decodeWatcherCorrelatedSnapshot(
+  value: unknown,
+  schemaVersion = 1,
+): WatcherCorrelatedSnapshot {
   const object = expectObject(value, "correlated snapshot");
 
   const instance = readWatcherInstance(object, "correlated snapshot");
@@ -208,6 +228,7 @@ export function decodeWatcherCorrelatedSnapshot(value: unknown): WatcherCorrelat
   const effectiveConcurrency = readOptionalNullableNumber(object, "effectiveConcurrency") ?? 1;
   const concurrencySource = readOptionalNullableString(object, "concurrencySource") ?? "config";
   const estimate = readOptionalDurationEstimate(object, "correlated snapshot");
+  const services = readManagedServices(object, schemaVersion >= 2, "correlated snapshot");
 
   return {
     instance,
@@ -217,6 +238,7 @@ export function decodeWatcherCorrelatedSnapshot(value: unknown): WatcherCorrelat
     trigger,
     commands,
     tasks,
+    services,
     pending,
     freshness,
     durationMs,
@@ -246,7 +268,51 @@ export function snapshotToStatus(snapshot: WatcherCorrelatedSnapshot): WatcherSt
     commands: snapshot.commands,
     durationMs: snapshot.durationMs,
     failures: snapshot.failures,
+    services: snapshot.services ?? [],
   };
+}
+
+function readManagedServices(
+  object: Record<string, unknown>,
+  required: boolean,
+  what: string,
+): WatcherManagedService[] {
+  if (!("services" in object)) {
+    if (required) throw new WatcherProtocolError(`Funzzy ${what}: "services" is required`);
+    return [];
+  }
+  const raw = object["services"];
+  if (!Array.isArray(raw)) {
+    throw new WatcherProtocolError(
+      `Funzzy ${what}: "services" must be an array, got ${describeValue(raw)}`,
+    );
+  }
+  return raw.map((value, index) => {
+    const service = expectObject(value, `${what} service at index ${index}`);
+    const state = service["state"];
+    if (
+      typeof state !== "string" ||
+      !WATCHER_SERVICE_STATES.includes(state as WatcherServiceState)
+    ) {
+      throw new WatcherProtocolError(
+        `Funzzy ${what}: service "state" must be one of ${WATCHER_SERVICE_STATES.join(", ")}, got ${describeValue(state)}`,
+      );
+    }
+    return {
+      name: readRequiredString(service, "name", what),
+      instanceId: readRequiredNumber(service, "instanceId", what),
+      state: state as WatcherServiceState,
+      originGeneration: readNullableNumber(service, "originGeneration", what),
+      revision: readRequiredNumber(service, "revision", what),
+      signature: readRequiredString(service, "signature", what),
+      restartAttemptsUsed: readRequiredNumber(service, "restartAttemptsUsed", what),
+      restartAttemptsRemaining: readRequiredNumber(service, "restartAttemptsRemaining", what),
+      startedAtEpochMs: readNullableNumber(service, "startedAtEpochMs", what),
+      readyAtEpochMs: readNullableNumber(service, "readyAtEpochMs", what),
+      uptimeMs: readNullableNumber(service, "uptimeMs", what),
+      latestError: readNullableString(service, "latestError", what),
+    };
+  });
 }
 
 function readWatcherInstance(object: Record<string, unknown>, what: string): WatcherInstance {
@@ -361,6 +427,7 @@ function readWatcherFeatures(object: Record<string, unknown>): WatcherFeatures {
     durationEstimates: readOptionalFeatureFlag(features, "features.durationEstimates"),
     // Additive (TASK-0073): absent on legacy servers, never assumed.
     sequentialOverride: readOptionalFeatureFlag(features, "features.sequentialOverride"),
+    managedServices: readOptionalFeatureFlag(features, "features.managedServices"),
   };
 }
 

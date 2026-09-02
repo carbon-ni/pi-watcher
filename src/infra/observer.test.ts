@@ -17,6 +17,7 @@ const STATUS: WatcherStatus = {
   commands: ["cargo test"],
   durationMs: 42,
   failures: [],
+  services: [],
 };
 
 const SNAPSHOT = {
@@ -27,6 +28,7 @@ const SNAPSHOT = {
   trigger: "src/main.rs",
   commands: ["make all"],
   tasks: [{ id: "t-1", name: "test @agent-final", state: "passed", durationMs: 42 }],
+  services: [],
   pending: 0,
   freshness: "current",
   durationMs: 42,

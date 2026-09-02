@@ -16,6 +16,32 @@ export { WatcherProtocolError } from "./protocol.js";
 
 export type WatcherExecutionState = (typeof EXECUTION_STATES)[number];
 
+export const WATCHER_SERVICE_STATES = [
+  "starting",
+  "ready",
+  "restarting",
+  "stopping",
+  "failed",
+  "stopped",
+] as const;
+
+export type WatcherServiceState = (typeof WATCHER_SERVICE_STATES)[number];
+
+export interface WatcherManagedService {
+  name: string;
+  instanceId: number;
+  state: WatcherServiceState;
+  originGeneration: number | null;
+  revision: number;
+  signature: string;
+  restartAttemptsUsed: number;
+  restartAttemptsRemaining: number;
+  startedAtEpochMs: number | null;
+  readyAtEpochMs: number | null;
+  uptimeMs: number | null;
+  latestError: string | null;
+}
+
 export interface WatcherTarget {
   name: string;
   commands: string[];
@@ -30,6 +56,8 @@ export interface WatcherStatus {
   commands: string[];
   durationMs: number | null;
   failures: string[];
+  /** Normalized to [] by decoders; optional for source-level legacy callers. */
+  services?: WatcherManagedService[];
 }
 
 /**
@@ -38,7 +66,7 @@ export interface WatcherStatus {
  * Wire shape is produced by the Rust control server (`src/control.rs`):
  * `ControlState` serialized with serde camelCase.
  */
-export function decodeWatcherStatus(value: unknown): WatcherStatus {
+export function decodeWatcherStatus(value: unknown, schemaVersion = 1): WatcherStatus {
   const object = expectObject(value, "status response");
 
   const generation = readRequiredNumber(object, "generation", "status response");
@@ -47,8 +75,65 @@ export function decodeWatcherStatus(value: unknown): WatcherStatus {
   const commands = readStringArray(object, "commands", "status response");
   const durationMs = readNullableNumber(object, "durationMs", "status response");
   const failures = readStringArray(object, "failures", "status response");
+  const negotiatedSchema = readOptionalSchemaVersion(object) ?? schemaVersion;
+  const services = readServices(object, negotiatedSchema >= 2, "status response");
+  const normalizedServices = negotiatedSchema >= 2 || "services" in object ? { services } : {};
 
-  return { generation, state, trigger, commands, durationMs, failures };
+  return { generation, state, trigger, commands, durationMs, failures, ...normalizedServices };
+}
+
+function readOptionalSchemaVersion(object: Record<string, unknown>): number | null {
+  if (!("schemaVersion" in object)) return null;
+  const value = object["schemaVersion"];
+  if (typeof value !== "number" || !Number.isSafeInteger(value)) {
+    throw new WatcherProtocolError(
+      `Funzzy status response: "schemaVersion" must be a number, got ${describeValue(value)}`,
+    );
+  }
+  return value;
+}
+
+function readServices(
+  object: Record<string, unknown>,
+  required: boolean,
+  what: string,
+): WatcherManagedService[] {
+  if (!("services" in object)) {
+    if (required) throw new WatcherProtocolError(`Funzzy ${what}: "services" is required`);
+    return [];
+  }
+  const value = object["services"];
+  if (!Array.isArray(value)) {
+    throw new WatcherProtocolError(
+      `Funzzy ${what}: "services" must be an array, got ${describeValue(value)}`,
+    );
+  }
+  return value.map((entry, index) => {
+    const service = expectObject(entry, `${what} service at index ${index}`);
+    const state = service["state"];
+    if (
+      typeof state !== "string" ||
+      !WATCHER_SERVICE_STATES.includes(state as WatcherServiceState)
+    ) {
+      throw new WatcherProtocolError(
+        `Funzzy ${what}: service "state" must be one of ${WATCHER_SERVICE_STATES.join(", ")}, got ${describeValue(state)}`,
+      );
+    }
+    return {
+      name: readRequiredString(service, "name", what),
+      instanceId: readRequiredNumber(service, "instanceId", what),
+      state: state as WatcherServiceState,
+      originGeneration: readNullableNumber(service, "originGeneration", what),
+      revision: readRequiredNumber(service, "revision", what),
+      signature: readRequiredString(service, "signature", what),
+      restartAttemptsUsed: readRequiredNumber(service, "restartAttemptsUsed", what),
+      restartAttemptsRemaining: readRequiredNumber(service, "restartAttemptsRemaining", what),
+      startedAtEpochMs: readNullableNumber(service, "startedAtEpochMs", what),
+      readyAtEpochMs: readNullableNumber(service, "readyAtEpochMs", what),
+      uptimeMs: readNullableNumber(service, "uptimeMs", what),
+      latestError: readNullableString(service, "latestError", what),
+    };
+  });
 }
 
 /**

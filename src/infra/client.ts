@@ -508,10 +508,17 @@ export function formatStatus(status: FunzzyStatus): string {
   const generation = `gen=${status.generation}`;
   const tests = status.commands.length > 0 ? ` tests=${status.commands.join(" && ")}` : "";
   const trigger = status.trigger ? ` trigger=${status.trigger}` : "";
+  // Generation outcome and managed-service health are independent facts.
+  // Keep service telemetry in the same compact receipt so Pi never renders a
+  // passed generation as healthy when a pooled service has since failed.
+  const services =
+    status.services && status.services.length > 0
+      ? ` services=${status.services.map((service) => `${service.name}:${service.state}`).join(",")}`
+      : "";
 
   if (status.state === "passed") {
     const duration = status.durationMs === null ? "" : ` duration=${status.durationMs}ms`;
-    return `PASS ${generation}${tests}${duration}${trigger}`;
+    return `PASS ${generation}${tests}${duration}${trigger}${services}`;
   }
 
   if (status.state === "failed") {
@@ -519,11 +526,11 @@ export function formatStatus(status: FunzzyStatus): string {
       .slice(0, 5)
       .map((failure) => `- ${failure}`)
       .join("\n");
-    const summary = `FAIL ${generation} failures=${status.failures.length}${tests}${trigger}`;
+    const summary = `FAIL ${generation} failures=${status.failures.length}${tests}${trigger}${services}`;
     return failures ? `${summary}\n${failures}` : summary;
   }
 
-  return `${status.state.toUpperCase()} ${generation}${tests}${trigger}`;
+  return `${status.state.toUpperCase()} ${generation}${tests}${trigger}${services}`;
 }
 
 function debugLog(message: string): void {

@@ -291,6 +291,16 @@ test("formats compact passed and failed receipts", () => {
   );
 });
 
+test("renders service health separately from the generation outcome", () => {
+  assert.equal(
+    formatStatus({
+      ...passed,
+      services: [{ name: "api", state: "failed" }],
+    }),
+    "PASS gen=4 tests=cargo test duration=42ms trigger=src/main.rs services=api:failed",
+  );
+});
+
 const outputResult = {
   generation: 7,
   tasks: [

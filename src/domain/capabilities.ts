@@ -12,9 +12,19 @@ import {
 } from "./protocol.js";
 
 export { WatcherProtocolError } from "./protocol.js";
-export type { WatcherExecutionState } from "./watcher.js";
+export {
+  WATCHER_SERVICE_STATES,
+  type WatcherExecutionState,
+  type WatcherManagedService,
+  type WatcherServiceState,
+} from "./watcher.js";
 
 import type { WatcherStatus } from "./watcher.js";
+import {
+  WATCHER_SERVICE_STATES,
+  type WatcherManagedService,
+  type WatcherServiceState,
+} from "./watcher.js";
 
 /**
  * Correlated snapshot vocabulary (contract §1, §3):
@@ -106,6 +116,8 @@ export interface WatcherCorrelatedSnapshot {
   failures: string[];
   /** Changed paths of the batch (optional; empty when unreported). */
   paths: string[];
+  /** Live managed services, independent from generation outcome. */
+  services?: WatcherManagedService[];
   /** Configured scheduler concurrency of this watcher (TASK-0073). */
   configuredConcurrency: number;
   /** Effective concurrency of this generation (TASK-0073). */
@@ -208,6 +220,7 @@ export function decodeWatcherCorrelatedSnapshot(value: unknown): WatcherCorrelat
   const effectiveConcurrency = readOptionalNullableNumber(object, "effectiveConcurrency") ?? 1;
   const concurrencySource = readOptionalNullableString(object, "concurrencySource") ?? "config";
   const estimate = readOptionalDurationEstimate(object, "correlated snapshot");
+  const services = readManagedServices(object, "correlated snapshot");
 
   return {
     instance,
@@ -217,6 +230,7 @@ export function decodeWatcherCorrelatedSnapshot(value: unknown): WatcherCorrelat
     trigger,
     commands,
     tasks,
+    services,
     pending,
     freshness,
     durationMs,
@@ -246,7 +260,37 @@ export function snapshotToStatus(snapshot: WatcherCorrelatedSnapshot): WatcherSt
     commands: snapshot.commands,
     durationMs: snapshot.durationMs,
     failures: snapshot.failures,
+    services: snapshot.services ?? [],
   };
+}
+
+function readManagedServices(
+  object: Record<string, unknown>,
+  what: string,
+): WatcherManagedService[] {
+  if (!("services" in object)) return [];
+  const raw = object["services"];
+  if (!Array.isArray(raw)) {
+    throw new WatcherProtocolError(
+      `Funzzy ${what}: "services" must be an array, got ${describeValue(raw)}`,
+    );
+  }
+  return raw.map((value, index) => {
+    const service = expectObject(value, `${what} service at index ${index}`);
+    const state = service["state"];
+    if (
+      typeof state !== "string" ||
+      !WATCHER_SERVICE_STATES.includes(state as WatcherServiceState)
+    ) {
+      throw new WatcherProtocolError(
+        `Funzzy ${what}: service "state" must be one of ${WATCHER_SERVICE_STATES.join(", ")}, got ${describeValue(state)}`,
+      );
+    }
+    return {
+      name: readRequiredString(service, "name", what),
+      state: state as WatcherServiceState,
+    };
+  });
 }
 
 function readWatcherInstance(object: Record<string, unknown>, what: string): WatcherInstance {

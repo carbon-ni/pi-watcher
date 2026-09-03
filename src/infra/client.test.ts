@@ -22,6 +22,7 @@ const passed = {
   commands: ["cargo test"],
   durationMs: 42,
   failures: [],
+  services: [],
 };
 
 const passedOutputSnapshot = {

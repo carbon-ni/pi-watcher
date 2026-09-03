@@ -1,6 +1,6 @@
 {
   "protocolVersion": "1.1",
-  "schemaVersion": 2,
+  "schemaVersion": 1,
   "instance": {
     "token": "fz-7f3a",
     "startedAtEpochMs": 1710000000000

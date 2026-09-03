@@ -143,6 +143,19 @@ describe("decodeWatcherCorrelatedSnapshot", () => {
     freshness: "current",
   };
 
+  it("decodes managed service telemetry with strict vocabulary", () => {
+    const snapshot = decodeWatcherCorrelatedSnapshot({
+      ...minimum,
+      services: [
+        {
+          name: "api",
+          state: "ready",
+        },
+      ],
+    });
+    expect(snapshot.services?.[0]).toMatchObject({ name: "api", state: "ready" });
+  });
+
   it("decodes a correlated snapshot with defaults", () => {
     expect(decodeWatcherCorrelatedSnapshot(minimum)).toEqual({
       instance: { token: "fz-7f3a", startedAtEpochMs: null },
@@ -152,6 +165,7 @@ describe("decodeWatcherCorrelatedSnapshot", () => {
       trigger: null,
       commands: [],
       tasks: [],
+      services: [],
       pending: 0,
       freshness: "current",
       durationMs: null,

@@ -12,12 +12,14 @@ describe("decodeWatcherStatus", () => {
   // Wire fixture exactly as the Rust control server serializes it
   // (src/control.rs: ControlState with serde camelCase).
   const rustStatusPayload = {
+    schemaVersion: 2,
     generation: 4,
     state: "passed",
     trigger: "src/main.rs",
     commands: ["cargo test"],
     durationMs: 42,
     failures: [],
+    services: [],
   };
 
   it("decodes a Rust-produced passed status", () => {
@@ -28,6 +30,7 @@ describe("decodeWatcherStatus", () => {
       commands: ["cargo test"],
       durationMs: 42,
       failures: [],
+      services: [],
     });
   });
 

@@ -16,6 +16,22 @@ export { WatcherProtocolError } from "./protocol.js";
 
 export type WatcherExecutionState = (typeof EXECUTION_STATES)[number];
 
+export const WATCHER_SERVICE_STATES = [
+  "starting",
+  "ready",
+  "restarting",
+  "stopping",
+  "failed",
+  "stopped",
+] as const;
+
+export type WatcherServiceState = (typeof WATCHER_SERVICE_STATES)[number];
+
+export interface WatcherManagedService {
+  name: string;
+  state: WatcherServiceState;
+}
+
 export interface WatcherTarget {
   name: string;
   commands: string[];
@@ -30,6 +46,8 @@ export interface WatcherStatus {
   commands: string[];
   durationMs: number | null;
   failures: string[];
+  /** Normalized to [] by decoders; optional for source-level legacy callers. */
+  services?: WatcherManagedService[];
 }
 
 /**
@@ -47,8 +65,35 @@ export function decodeWatcherStatus(value: unknown): WatcherStatus {
   const commands = readStringArray(object, "commands", "status response");
   const durationMs = readNullableNumber(object, "durationMs", "status response");
   const failures = readStringArray(object, "failures", "status response");
+  const services = readServices(object, "status response");
 
-  return { generation, state, trigger, commands, durationMs, failures };
+  return { generation, state, trigger, commands, durationMs, failures, services };
+}
+
+function readServices(object: Record<string, unknown>, what: string): WatcherManagedService[] {
+  if (!("services" in object)) return [];
+  const value = object["services"];
+  if (!Array.isArray(value)) {
+    throw new WatcherProtocolError(
+      `Funzzy ${what}: "services" must be an array, got ${describeValue(value)}`,
+    );
+  }
+  return value.map((entry, index) => {
+    const service = expectObject(entry, `${what} service at index ${index}`);
+    const state = service["state"];
+    if (
+      typeof state !== "string" ||
+      !WATCHER_SERVICE_STATES.includes(state as WatcherServiceState)
+    ) {
+      throw new WatcherProtocolError(
+        `Funzzy ${what}: service "state" must be one of ${WATCHER_SERVICE_STATES.join(", ")}, got ${describeValue(state)}`,
+      );
+    }
+    return {
+      name: readRequiredString(service, "name", what),
+      state: state as WatcherServiceState,
+    };
+  });
 }
 
 /**
